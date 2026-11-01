@@ -25,7 +25,7 @@ An agent skill is a file of instructions or code that an AI agent loads and foll
 - Snyk's ToxicSkills study scanned 3,984 skills from ClawHub and skills.sh. 534 skills (13.4%) had at least one critical issue. 1,467 skills had at least one security issue. Snyk confirmed 76 malicious payloads. [[2]](#sources)
 - The OWASP Agentic Skills Top 10 lists Malicious Skills as AST01 and Supply Chain Compromise as AST02. [[3]](#sources)
 
-skillshield checks skill files for these patterns with 12 rules. It runs locally and needs no network access.
+skillshield checks skill files for these patterns with 13 rules. It runs locally and needs no network access.
 
 ---
 
@@ -64,7 +64,7 @@ skillshield scan SKILL.md                  # scan one file
 skillshield scan ./skills/                 # scan a directory
 skillshield scan - < SKILL.md              # scan stdin
 skillshield check "some text to scan"      # scan text given on the command line
-skillshield rules                          # list the 12 rules
+skillshield rules                          # list the 13 rules
 skillshield --version
 ```
 
@@ -223,10 +223,11 @@ The outputs in the comments come from scanning the sample `SKILL.md` above, and 
 | SG-010 | HIGH | Social Engineering | False urgency, threats to suspend an account, and requests for passwords, codes or credentials. |
 | SG-011 | CRITICAL | Lethal Trifecta (Supply Chain Attack Pattern) | SG-001 prompt injection, a network reference (`http://`, `https://`, `requests`, `urllib`, `socket`, `curl`, `wget`) and file system access (`open(`, `os.listdir`, `os.walk`, `os.scandir`, `pathlib.Path`, `glob.glob`, `shutil`) all in the same text. It does not report line numbers. |
 | SG-012 | MEDIUM | Suspicious URL | URLs with a raw IP address, tunnel or request-capture services (ngrok, webhook.site, requestbin, pipedream), paste sites, URL shorteners, or the TLDs `.xyz`, `.tk`, `.ml`, `.ga`, `.cf`, `.gq` and `.top`. |
+| SG-013 | HIGH | Untrusted Package Registry | `pip`, `npm` or `yarn` pointed at a registry other than the official one -- `--index-url`, `--extra-index-url`, `-i`, `--registry`, `PIP_INDEX_URL`, `npm config set registry`, `yarn config set npmRegistryServer`, or a `pip.conf`, `.npmrc` or `.pypirc` line that sets an untrusted registry (`registry`, `@scope:registry`, `index-url`, `repository`). TestPyPI counts as untrusted: anyone can publish there. A later install then pulls the attacker's packages (dependency confusion, OWASP AST02). |
 
-That is 5 CRITICAL rules, 6 HIGH rules and 1 MEDIUM rule. Run `skillshield rules` to see each rule with its tags.
+That is 5 CRITICAL rules, 7 HIGH rules and 1 MEDIUM rule. Run `skillshield rules` to see each rule with its tags.
 
-Five rules have an OWASP tag: SG-001 (`owasp-asi01`), SG-002 (`owasp-asi02`), SG-003 (`owasp-asi03`), SG-010 (`owasp-asi04`) and SG-007 (`owasp-asi05`). These ASI IDs are not from the OWASP Agentic Skills Top 10, which uses the IDs AST01 to AST10. The other seven rules have no OWASP tag.
+Six rules have an OWASP tag: SG-001 (`owasp-asi01`), SG-002 (`owasp-asi02`), SG-003 (`owasp-asi03`), SG-010 (`owasp-asi04`), SG-007 (`owasp-asi05`) and SG-013 (`owasp-ast02`). These ASI IDs are not from the OWASP Agentic Skills Top 10, which uses the IDs AST01 to AST10. The other seven rules have no OWASP tag.
 
 SG-004 relates to the transparency obligations in Article 50 of the EU AI Act. [[4]](#sources)
 
@@ -404,7 +405,7 @@ skillshield scan ./skills/ --format sarif > skillshield.sarif
 
 - CRITICAL and HIGH findings have the level `error`. MEDIUM is `warning`, LOW is `note` and INFO is `none`.
 - Each result has one location per matched line, up to 5. A finding with no line numbers, such as SG-011, points at line 1.
-- The rule list in the log always holds all 12 rules.
+- The rule list in the log always holds all 13 rules.
 
 ---
 
@@ -489,7 +490,7 @@ It takes the settings above as environment variables (`SKILLSHIELD_PATHS`, `SKIL
 
 A rule needs an `id`, `name`, `severity`, `description` and `remediation`, plus a `pattern` (a compiled regex) or a `check_fn` (a function that takes the text and returns a list of matched strings).
 
-`SkillScanner(rules=[my_rule])` runs only `my_rule`. To add a rule to the 12 defaults, pass `rules=ALL_RULES + [my_rule]`.
+`SkillScanner(rules=[my_rule])` runs only `my_rule`. To add a rule to the 13 defaults, pass `rules=ALL_RULES + [my_rule]`.
 
 ```python
 import re
