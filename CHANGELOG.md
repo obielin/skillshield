@@ -15,6 +15,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - A Limitations section in the README.
 - SG-013, Untrusted Package Registry: flag `pip`, `npm` or `yarn` pointed at a registry other than the official one (`--index-url`, `--extra-index-url`, `-i`, `--registry`, `PIP_INDEX_URL`, npm/yarn config, or a `pip.conf`, `.npmrc` or `.pypirc` override), which lets a later install pull the attacker's packages (dependency confusion, OWASP AST02) (#46).
 - SG-006 now flags base64 data decoded and piped into a shell (`base64 -d | bash` and similar), whatever the length of the encoded string (#43). The ClawHavoc campaign used this as its execution trigger.
+- SG-008 now flags bidirectional control characters (U+202A to U+202E and U+2066 to U+2069), which make text display in a different order from how it is stored (Trojan Source, CVE-2021-42574) (#55). The finding shows the line with each character as `<U+202E>`, and names the character and line.
 
 ### Fixed
 

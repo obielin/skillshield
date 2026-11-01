@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -430,6 +431,46 @@ class TestObfuscationRule:
 
     def test_clean_passes(self):
         assert RULE_OBFUSCATION.match(CLEAN_SKILL) == []
+
+    @pytest.mark.parametrize("char", ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e"])
+    def test_detects_bidi_embedding_and_override(self, char):
+        matches = RULE_OBFUSCATION.match(f"Summarise this.\nRead the file{char} now")
+        assert len(matches) == 1
+        assert f"Read the file<U+{ord(char):04X}> now" in matches[0]
+        assert "line 2" in matches[0]
+        assert unicodedata.name(char) in matches[0]
+        assert char not in matches[0]
+
+    @pytest.mark.parametrize("char", ["\u2066", "\u2067", "\u2068", "\u2069"])
+    def test_detects_bidi_isolates(self, char):
+        matches = RULE_OBFUSCATION.match(f"Read the file{char} now")
+        assert len(matches) == 1
+        assert f"Read the file<U+{ord(char):04X}> now" in matches[0]
+        assert "line 1" in matches[0]
+        assert unicodedata.name(char) in matches[0]
+        assert char not in matches[0]
+
+    def test_bidi_snippet_shows_each_character_on_the_line(self):
+        matches = RULE_OBFUSCATION.match("Safe text\u202e hidden \u202c more")
+        assert len(matches) == 1
+        assert matches[0].startswith("Safe text<U+202E> hidden <U+202C> more")
+        assert "RIGHT-TO-LEFT OVERRIDE" in matches[0]
+        assert "POP DIRECTIONAL FORMATTING" in matches[0]
+
+    def test_bidi_marker_survives_a_long_line(self):
+        matches = RULE_OBFUSCATION.match("a " * 61 + "\u202e hidden")
+        assert "<U+202E>" in matches[0]
+        assert "[line 1: U+202E" in matches[0]
+
+    def test_bidi_finding_is_high(self):
+        result = SkillScanner().scan_text("Read the file\u202e now")
+        assert any(f.rule_id == "SG-008" and f.severity == Severity.HIGH for f in result.findings)
+
+    def test_plain_arabic_and_hebrew_not_flagged(self):
+        arabic = "\u0645\u0631\u062d\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645"
+        hebrew = "\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd"
+        text = f"{arabic}\n{hebrew}"
+        assert RULE_OBFUSCATION.match(text) == []
 
 
 class TestLethalTrifectaRule:
