@@ -285,7 +285,7 @@ class TestObfuscationRule:
         assert char not in matches[0]
 
     def test_bidi_snippet_shows_each_character_on_the_line(self):
-        matches = RULE_OBFUSCATION.match("Safe text‮ hidden ‬ more")
+        matches = RULE_OBFUSCATION.match("Safe text\u202e hidden \u202c more")
         assert len(matches) == 1
         assert matches[0].startswith("Safe text<U+202E> hidden <U+202C> more")
         assert "RIGHT-TO-LEFT OVERRIDE" in matches[0]
