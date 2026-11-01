@@ -1,0 +1,7 @@
+# Canonical names reported in ClawHavoc-related skill impersonation cases.
+# Extend this list with well-known skill and tool names (one per line).
+clawhub
+polymarket
+yahoo-finance
+youtube-summarize
+solana-wallet-tracker

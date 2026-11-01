@@ -865,3 +865,120 @@ def test_cli_version_prints_package_version(monkeypatch, capsys):
         main()
     assert exit_info.value.code == 0
     assert capsys.readouterr().out.strip() == f"skillshield {skillshield.__version__}"
+
+
+class TestBrandNameImpersonationRule:
+    def _scan_name(self, name):
+        return SkillScanner().scan_text(
+            f"---\nname: {name}\ndescription: test\n---\nA harmless skill."
+        )
+
+    def test_detects_typo_of_known_name(self):
+        result = self._scan_name("cllawhub")
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+    def test_detects_known_name_with_numeric_suffix(self):
+        result = self._scan_name("clawhub1")
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+    def test_detects_known_name_with_pro_suffix(self):
+        result = self._scan_name("polymarket-pro")
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+    def test_detects_numeric_suffix_before_unquoted_yaml_comment(self):
+        result = self._scan_name("clawhub1 # release")
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+    def test_preserves_hash_inside_quoted_name(self):
+        result = self._scan_name('"clawhub#1"')
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+    def test_decodes_unicode_escape_in_double_quoted_name(self):
+        result = self._scan_name(r'"clawhub\u0031"')
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+        finding = next(f for f in result.findings if f.rule_id == "SG-015")
+        assert finding.line_numbers == [2]
+        assert finding.snippets[0] == r'"clawhub\u0031"'
+
+    def test_detects_multiline_double_quoted_name(self):
+        result = self._scan_name('"claw\\\n  hub1"')
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+        finding = next(f for f in result.findings if f.rule_id == "SG-015")
+        assert finding.line_numbers == [2]
+
+    def test_detects_multiline_double_quoted_name_with_trailing_comment(self):
+        name = '"claw' + "\\" + "\n" + '  hub1" # release'
+        result = self._scan_name(name)
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+        finding = next(f for f in result.findings if f.rule_id == "SG-015")
+        assert finding.line_numbers == [2]
+
+    def test_detects_indented_scalar_after_empty_name(self):
+        skill = "---\n" "name:\n" "  clawhub1\n" "description: test\n" "---\n" "A harmless skill."
+        result = SkillScanner().scan_text(skill)
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+    def test_skips_indented_comments_before_empty_name_scalar(self):
+        skill = (
+            "---\n"
+            "name:\n"
+            "  # metadata comment\n"
+            "  clawhub1\n"
+            "description: test\n"
+            "---\n"
+            "A harmless skill."
+        )
+        result = SkillScanner().scan_text(skill)
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+    @pytest.mark.parametrize(
+        "header",
+        ["|", ">", "|-", "|+", ">-", ">+", "|2", ">2", "|2-", "|-2", ">+2", ">2+"],
+    )
+    def test_detects_name_inside_yaml_block_scalar(self, header):
+        result = self._scan_name(f"{header}\n  clawhub1")
+        finding = next(f for f in result.findings if f.rule_id == "SG-015")
+        assert finding.line_numbers == [3]
+        assert finding.snippets[0] == "clawhub1"
+
+    def test_detects_name_inside_yaml_block_scalar_with_comment(self):
+        result = self._scan_name(">- # folded name\n  clawhub1")
+        finding = next(f for f in result.findings if f.rule_id == "SG-015")
+        assert finding.line_numbers == [3]
+
+    def test_detects_crlf_name_in_scan_text_and_scan_texts(self):
+        skill = "---\r\n" "name: clawhub1\r\n" "description: test\r\n" "---\r\n" "A harmless skill."
+        result = SkillScanner().scan_text(skill)
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+        report = SkillScanner().scan_texts({"crlf": skill})
+        assert report.flagged_count == 1
+
+    @pytest.mark.parametrize("name_key", ['"name"', "'name'"])
+    def test_matches_quoted_name_keys(self, name_key):
+        skill = f"---\n{name_key}: clawhub1\n" "description: test\n---\nA harmless skill."
+        result = SkillScanner().scan_text(skill)
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+    def test_detects_punctuation_only_name_variant(self):
+        result = self._scan_name("claw-hub")
+        assert "SG-015" in [finding.rule_id for finding in result.findings]
+
+    def test_allows_exact_known_name(self):
+        result = self._scan_name("clawhub")
+        assert "SG-015" not in [finding.rule_id for finding in result.findings]
+
+    @pytest.mark.parametrize(
+        "name",
+        ["research", "leather", "feather", "heater", "gitlab", "weather-uk"],
+    )
+    def test_does_not_flag_benign_near_misses(self, name):
+        result = self._scan_name(name)
+        assert "SG-015" not in [finding.rule_id for finding in result.findings]
+
+    def test_ignores_files_without_frontmatter(self):
+        result = SkillScanner().scan_text("# A normal skill\nNo metadata here.")
+        assert "SG-015" not in [finding.rule_id for finding in result.findings]
