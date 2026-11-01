@@ -230,6 +230,18 @@ class TestReportToSarif:
         run = report_to_sarif(report)["runs"][0]
         assert len(run["results"]) >= 1
 
+    def test_directory_scan_uris_are_relative_paths(self, tmp_path):
+        for sub in ("a", "b"):
+            (tmp_path / sub).mkdir()
+            (tmp_path / sub / "SKILL.md").write_text(INJECTION_SKILL)
+        run = report_to_sarif(SkillScanner().scan_directory(tmp_path))["runs"][0]
+        uris = {
+            loc["physicalLocation"]["artifactLocation"]["uri"]
+            for result in run["results"]
+            for loc in result["locations"]
+        }
+        assert uris == {"a/SKILL.md", "b/SKILL.md"}
+
 
 # ── to_sarif_string ────────────────────────────────────────────
 

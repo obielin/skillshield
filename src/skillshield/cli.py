@@ -218,7 +218,7 @@ def cmd_rules(args) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="skillshield",
-        description="Security scanner for AI agent skills. Detects prompt injection, exfiltration, and malicious payloads.",
+        description="Security scanner for AI agent skills. Flags known prompt-injection, exfiltration and malicious-payload patterns.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skillshield"
 dynamic = ["version"]
-description = "Security scanner for AI agent skills. Detects prompt injection, data exfiltration, and malicious payloads before you install. Zero dependencies."
+description = "Security scanner for AI agent skills. Flags known prompt-injection, data-exfiltration and malicious-payload patterns before you install. Zero dependencies."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Linda Oraegbunam" }]

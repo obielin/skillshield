@@ -1,0 +1,199 @@
+# CodeRabbit configuration for SkillShield.
+# CodeRabbit is a first reviewer: it comments and suggests, and a maintainer
+# decides. It never requests changes or pushes to a branch. The only label it
+# applies is quality-check (see slop_detection); all others are suggestions.
+# Docs: https://docs.coderabbit.ai/reference/configuration
+language: en-US
+tone_instructions: "Be specific and brief. Cite file:line. Be warm to first-time contributors. Prefer one precise finding over three vague ones. Show a failing input when you report a bug."
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_instructions: "Say what changes for someone running SkillShield: which skills are now flagged or no longer flagged, at what severity, and whether exit codes or output formats change. Name any rule IDs added or changed."
+  poem: false
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  auto_apply_labels: false
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+  abort_on_close: true
+
+  # Applies the quality-check label to PRs that look low-effort or
+  # machine-generated, so a maintainer reads them first. Nothing is closed or
+  # blocked on this label. This is the one label CodeRabbit applies itself.
+  slop_detection:
+    enabled: true
+    label: "quality-check"
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    base_branches:
+      - main
+    ignore_usernames:
+      - dependabot[bot]
+      - github-actions[bot]
+
+  path_filters:
+    - "!**/*.pyc"
+    - "!**/*.zip"
+    - "!**/*.docx"
+
+  path_instructions:
+    - path: "src/skillshield/rules.py"
+      instructions: |
+        Detection rules. Check every new or changed regular expression for:
+        1. Performance. Flag patterns that can take quadratic or exponential time:
+           nested quantifiers such as (a+)+, overlapping alternatives under a quantifier,
+           and multiline patterns that start with ^\s* (\s matches newlines, so on a
+           file of blank lines every line start re-scans the rest of the file). Suggest
+           [ \t]* where a match must stay on one line. Ask for a test that scans
+           100,000 blank lines in under a second.
+        2. False positives. Name an ordinary sentence or command the pattern would
+           wrongly match (for example `curl -i https://...` for a pip `-i` pattern),
+           and check the PR has a near-miss test for it.
+        3. Rule IDs. A new rule must use the next unused SG-NNN ID after the highest in
+           ALL_RULES on main. Check related open PRs for the same ID and say so if two
+           PRs claim it. Existing IDs must never be renumbered.
+        Every new rule needs a description that cites where the technique comes from,
+        remediation text, tags, an entry in ALL_RULES and a row in the README rules table.
+    - path: "src/skillshield/scanner.py"
+      instructions: |
+        Core scanner. Changes to scoring or risk levels affect every user and the exit
+        code of every CI run: describe the before and after for one finding of each
+        severity. File selection must never skip a file silently. Any decoding,
+        archive reading or recursion must be bounded in size and depth. No network
+        access, no new runtime dependencies.
+    - path: "src/skillshield/ci.py"
+      instructions: "Runs inside the GitHub Action. Settings must come from environment variables, never from text pasted into a shell. Check that exit codes stay 0 pass, 1 fail, 2 error, and that a missing path or unreadable file can never produce exit 0."
+    - path: "action.yml"
+      instructions: "Treat as security-sensitive. Inputs must reach scripts through env:, never through ${{ inputs.* }} inside run:. Flag anything that fetches code at run time or widens what the action can access."
+    - path: "tests/fixtures/**"
+      instructions: |
+        Attack samples. Every sample must be defanged: URLs on example.com, example.org or
+        documentation IP ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24), obviously
+        fake keys, no working payloads, no live malicious domains, wallet addresses or
+        code copied from real malware. Flag anything that would run or connect.
+    - path: "tests/test_redteam.py"
+      instructions: "When a PR fixes a known gap, the sample must be removed from KNOWN_GAPS, KNOWN_FALSE_POSITIVES or FOLDER_GAPS, and docs/threat-coverage.md must be updated in the same PR. Flag any change that lowers a severity in EXPECTED or adds a sample to a gap list to make a test pass."
+    - path: "tests/**"
+      instructions: "Tests must not use the network or depend on test order. A new rule needs at least two true positives worded differently, one true negative and one near-miss. Check that the PR description names a test that fails without the change."
+    - path: "docs/threat-coverage.md"
+      instructions: "Must agree with tests/test_redteam.py: a sample marked Covered must not be in a gap list, and the summary counts must add up. Every source must be a link."
+    - path: "pyproject.toml"
+      instructions: "SkillShield has no runtime dependencies. Flag anything added to [project] dependencies. Development tools in the dev extra are fine."
+    - path: ".github/workflows/**"
+      instructions: "Treat as security-sensitive. Flag pull_request_target with a checkout of the fork, secrets exposed to fork code, unpinned third-party actions, and permissions broader than needed."
+    - path: "README.md"
+      instructions: "If the PR adds or changes a rule, check the rules table and the rule counts (CRITICAL, HIGH, MEDIUM) still match ALL_RULES."
+
+  tools:
+    gitleaks: { enabled: true }
+    trufflehog: { enabled: true }
+    actionlint: { enabled: true }
+    zizmor: { enabled: true }
+    shellcheck: { enabled: true }
+    semgrep: { enabled: true }
+    osvScanner: { enabled: true }
+    yamllint: { enabled: true }
+    github-checks: { enabled: true, timeout_ms: 900000 }
+    markdownlint: { enabled: false }
+    languagetool: { enabled: false }
+    vale: { enabled: false }
+
+  finishing_touches:
+    docstrings: { enabled: false }
+    unit_tests: { enabled: false }     # off: generated tests can be committed to a contributor's branch
+    simplify: { enabled: false }
+    autofix: { enabled: false }        # no bot pushes to a contributor's branch
+    fix_ci: { enabled: false }
+    resolve_merge_conflict: { enabled: false }
+
+  pre_merge_checks:
+    override_requested_reviewers_only: false
+    docstrings: { mode: off }
+    title:
+      mode: warning
+      requirements: "Conventional Commits prefix (feat, fix, docs, test, refactor, chore, ci), an optional scope in parentheses such as (rules) or (scanner), then a factual summary in the imperative."
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      - name: "Unix line endings"
+        mode: error
+        instructions: "Fail if the PR adds Windows (CRLF) line endings to any text file, or converts an existing LF file to CRLF. Point the author to: git config core.autocrlf input, then git add --renormalize ."
+      - name: "No runtime dependencies"
+        mode: error
+        instructions: "Fail if the PR adds a runtime dependency to pyproject.toml or imports a third-party package from src/skillshield/."
+      - name: "Defanged samples"
+        mode: error
+        instructions: "Fail if any added test sample or example contains a working payload, a real secret, or a URL, domain, IP address or wallet address that is not obviously fake or reserved for documentation."
+      - name: "Regex performance"
+        mode: warning
+        instructions: "Only consider regular expressions added or changed in Python files under src/ (ignore patterns quoted in documentation or configuration). Warn if one has nested quantifiers, or is a multiline pattern starting with ^\\s*, and the PR has no test showing a 100,000-line input scans in under a second."
+      - name: "Rule tests"
+        mode: warning
+        instructions: "Warn if the PR adds a detection rule or pattern without at least two true positives, one true negative and one near-miss test, or without a reference to where the technique comes from."
+      - name: "Changelog"
+        mode: warning
+        instructions: "Warn if the PR changes behaviour under src/ or action.yml without a line under [Unreleased] in CHANGELOG.md."
+
+  # After a merge, report drift as a comment on the merged PR. No other action.
+  post_merge_actions:
+    - name: "threat coverage drift report"
+      enabled: true
+      prompt: "Only act if this merge changed src/skillshield/rules.py, src/skillshield/scanner.py or tests/test_redteam.py. Check whether docs/threat-coverage.md, the README rules table and rule counts, and CHANGELOG.md still match the code. List each mismatch with the file and the line that needs to change. If nothing drifted, reply with exactly: no coverage drift. Post a text report in the result comment only. Do not open a pull request, do not create or edit issues, do not push commits, do not comment anywhere else."
+
+  labeling_instructions:
+    - label: "needs-rebase"
+      instructions: "Suggest when the PR has merge conflicts with main."
+
+chat:
+  auto_reply: true
+  allow_non_org_members: true
+  art: false
+
+knowledge_base:
+  opt_out: false
+  web_search: { enabled: true }
+  learnings: { scope: auto, approval_delay: 7 }
+  issues: { scope: auto }
+  pull_requests: { scope: auto }
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "GOVERNANCE.md"
+      - "docs/threat-coverage.md"
+      - "tests/fixtures/redteam/README.md"
+
+code_generation:
+  unit_tests:
+    path_instructions:
+      - path: "src/skillshield/**/*.py"
+        instructions: "Use pytest in the existing files under tests/. No network, no writes outside tmp_path, and every sample defanged (example.com, fake keys). For a rule, cover two true positives, one true negative and one near-miss."
+
+issue_enrichment:
+  auto_enrich: { enabled: false }
+  planning:
+    enabled: true
+    # Plans only on issues a maintainer marks agent-candidate, never on issues
+    # kept for people to work out themselves.
+    auto_planning:
+      enabled: true
+      labels:
+        - "agent-candidate"
+        - "!good first issue"
+        - "!help wanted"
+  labeling:
+    auto_apply_labels: false

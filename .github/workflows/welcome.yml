@@ -40,7 +40,7 @@ jobs:
                 + `- [CONTRIBUTING.md](${base}/CONTRIBUTING.md) has the details, including how test samples must be defanged.`
               : `Thanks for opening your first issue, @${user}. A maintainer will take a look.\n\n`
                 + `- [SUPPORT.md](${base}/SUPPORT.md) lists where to ask what.\n`
-                + `- If you would like to fix it yourself, [CONTRIBUTING.md](${base}/CONTRIBUTING.md) explains how.`;
+                + `- If you would like to fix it yourself, comment \`/assign\` to claim it. [CONTRIBUTING.md](${base}/CONTRIBUTING.md) explains how.`;
 
             await github.rest.issues.createComment({
               owner, repo, issue_number: item.number, body });

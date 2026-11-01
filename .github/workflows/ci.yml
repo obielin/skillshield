@@ -23,3 +23,8 @@ jobs:
         with: {python-version: "3.11"}
       - run: pip install -e ".[dev]"
       - run: ruff check src/ tests/ && black --check src/ tests/
+  claims-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: node --test .github/scripts/claims.test.js

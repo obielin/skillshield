@@ -1,5 +1,5 @@
 name: SkillShield Scan
-description: Scan AI agent skills for prompt injection, data exfiltration and malicious payloads before they are merged or installed.
+description: Scan AI agent skills for known prompt-injection, data-exfiltration and malicious-payload patterns before they are merged or installed.
 author: Linda Oraegbunam
 branding:
   icon: shield

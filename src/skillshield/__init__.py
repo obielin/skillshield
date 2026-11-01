@@ -2,7 +2,7 @@
 skillshield
 ==========
 Security scanner for AI agent skills.
-Detects prompt injection, data exfiltration, and malicious payloads
+Flags known prompt-injection, data-exfiltration and malicious-payload patterns
 before you install. Zero dependencies.
 
 Inspired by the ClawHavoc campaign (341 malicious skills, Jan 2026)

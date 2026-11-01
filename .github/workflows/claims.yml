@@ -1,0 +1,57 @@
+name: Issue claims
+
+# /assign, /unassign and /extend on issues, and a daily job that reminds and
+# then releases claims with no activity. The logic and its tests are in
+# .github/scripts/claims.js. This workflow only ever runs code from the default
+# branch: it checks out main, never a pull request.
+#
+# Commands are not queued with a concurrency group, because GitHub keeps only
+# one pending run per group and drops the rest. Instead, claims.js re-reads the
+# issue before acting and re-checks the rules after assigning, undoing its own
+# assignment if another run got there first.
+on:
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "17 7 * * *" # daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  command:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      !github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const { handleComment } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/claims.js`);
+            core.info(`result: ${await handleComment({ github, context })}`);
+
+  stale:
+    if: github.event_name != 'issue_comment'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: claims-stale
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const { releaseStale } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/claims.js`);
+            const actions = await releaseStale({ github, context });
+            core.info(JSON.stringify(actions));

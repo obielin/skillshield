@@ -54,6 +54,8 @@ EXPECTED = {
     "27-registry-hijack": Severity.HIGH,
     "28-whitespace-inflation": Severity.CRITICAL,
     "29-description-injection": Severity.CRITICAL,
+    "30-non-english-injection": Severity.CRITICAL,
+    "31-trifecta-reworded": Severity.CRITICAL,
 }
 
 # Malicious samples not yet flagged at their expected severity: sample -> what is missing.
@@ -70,7 +72,6 @@ KNOWN_GAPS = {
     "12-rug-pull": "instruction to replace the skill with remote content (#35)",
     "13-tool-poisoning": "hidden side action the user is told nothing about (#36)",
     "14-delayed-trigger": "dormant instruction that fires on a trigger word (#37)",
-    "15-base64-pipe-shell": "short base64 decoded and piped into a shell (#43)",
     "16-fake-prerequisite-archive": "fake prerequisite: download a password-protected archive and run it (#44)",
     "17-paste-site-script": "install script from a paste site pasted into a terminal (#45)",
     "18-memory-poisoning": "writes instructions into agent memory files (#47)",
@@ -82,7 +83,8 @@ KNOWN_GAPS = {
     "24-bidi-override": "right-to-left override characters hide what text says (#55)",
     "25-remote-instructions": "fetches instructions from a URL at run time and follows them (#52)",
     "26-seed-phrase-harvest": "asks for a crypto wallet recovery phrase (#53)",
-    "27-registry-hijack": "points pip or npm at an untrusted package registry (#46)",
+    "30-non-english-injection": "instruction override in a language other than English (#66)",
+    "31-trifecta-reworded": "lethal trifecta depends on the English injection phrases (#67)",
 }
 
 # Safe samples that are wrongly flagged: sample -> why it is safe.
