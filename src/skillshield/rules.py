@@ -623,6 +623,7 @@ _NAME_FIELD = re.compile(
     re.MULTILINE,
 )
 
+
 def _parse_name_scalar(value: str) -> str:
     """Parse a frontmatter name scalar using YAML comment and escape rules."""
     value = value.strip()
@@ -722,9 +723,7 @@ def _parse_name_scalar(value: str) -> str:
     return ""
 
 
-_BLOCK_SCALAR_HEADER = re.compile(
-    r"""[|>](?:(?:[+-][1-9]?)|(?:[1-9][+-]?))?(?:[ \t]+#.*)?"""
-)
+_BLOCK_SCALAR_HEADER = re.compile(r"""[|>](?:(?:[+-][1-9]?)|(?:[1-9][+-]?))?(?:[ \t]+#.*)?""")
 
 
 def _extract_name_scalar(frontmatter: str) -> tuple[str, str]:
