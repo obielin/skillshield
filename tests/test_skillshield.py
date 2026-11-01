@@ -457,6 +457,11 @@ class TestObfuscationRule:
         assert "RIGHT-TO-LEFT OVERRIDE" in matches[0]
         assert "POP DIRECTIONAL FORMATTING" in matches[0]
 
+    def test_bidi_marker_survives_a_long_line(self):
+        matches = RULE_OBFUSCATION.match("a " * 61 + "\u202e hidden")
+        assert "<U+202E>" in matches[0]
+        assert "[line 1: U+202E" in matches[0]
+
     def test_bidi_finding_is_high(self):
         result = SkillScanner().scan_text("Read the file\u202e now")
         assert any(f.rule_id == "SG-008" and f.severity == Severity.HIGH for f in result.findings)

@@ -291,9 +291,17 @@ def _check_obfuscation(text: str) -> list[str]:
         found = _BIDI_CONTROL_RE.findall(line)
         if not found:
             continue
-        shown = _BIDI_CONTROL_RE.sub(lambda m: f"<U+{ord(m.group(0)):04X}>", line.strip())
+        # Cut a window around the first control character before escaping it,
+        # so a long line cannot push the marker out of the excerpt.
+        line = line.strip()
+        first = _BIDI_CONTROL_RE.search(line).start()
+        start = max(0, first - 60)
+        window = line[start : start + 100]
+        shown = _BIDI_CONTROL_RE.sub(lambda m: f"<U+{ord(m.group(0)):04X}>", window)
+        if start:
+            shown = "..." + shown
         names = ", ".join(f"U+{ord(c):04X} {unicodedata.name(c)}" for c in dict.fromkeys(found))
-        matches.append(f"{shown[:120]} [line {lineno}: {names}]")
+        matches.append(f"{shown} [line {lineno}: {names}]")
 
     return matches
 
