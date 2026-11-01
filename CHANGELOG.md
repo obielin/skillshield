@@ -13,12 +13,17 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - A red-team corpus (`tests/fixtures/redteam/`, `tests/test_redteam.py`): 31 defanged malicious skills, one per attack technique, 4 safe skills that look suspicious, and a skill folder that hides its payload outside `SKILL.md`. Techniques SkillShield does not catch yet are tracked as known gaps.
 - `docs/threat-coverage.md`: the attack techniques reported against agent skills in 2025–2026, with sources, and how far SkillShield covers each.
 - A Limitations section in the README.
+- SG-013, Untrusted Package Registry: flag `pip`, `npm` or `yarn` pointed at a registry other than the official one (`--index-url`, `--extra-index-url`, `-i`, `--registry`, `PIP_INDEX_URL`, npm/yarn config, or a `pip.conf`, `.npmrc` or `.pypirc` override), which lets a later install pull the attacker's packages (dependency confusion, OWASP AST02) (#46).
 - SG-006 now flags base64 data decoded and piped into a shell (`base64 -d | bash` and similar), whatever the length of the encoded string (#43). The ClawHavoc campaign used this as its execution trigger.
 - SG-008 now flags bidirectional control characters (U+202A to U+202E and U+2066 to U+2069), which make text display in a different order from how it is stored (Trojan Source, CVE-2021-42574) (#55). The finding shows the line with each character as `<U+202E>`, and names the character and line.
 
 ### Fixed
 
 - A directory scan names each file by its path relative to the scanned directory (for example `a/SKILL.md`), with forward slashes, in text, JSON and SARIF output. Before, it used the file name only, so SARIF results for several `SKILL.md` files all pointed at `SKILL.md` (#24).
+
+### Fixed
+
+- A file's reported level is now at least the severity of its worst single finding, so one HIGH finding can no longer be diluted to MEDIUM by the file's other content; `skillshield.ci` exits non-zero when that file alone breaches the `fail-on` gate (issue #25).
 
 ## [1.2.0]
 

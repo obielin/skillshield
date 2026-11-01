@@ -11,6 +11,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
+from urllib.parse import urlparse
 
 
 class Severity(str, Enum):
@@ -473,6 +474,166 @@ RULE_SUSPICIOUS_URLS = Rule(
 )
 
 
+# ── SG-013: Untrusted Package Registry ───────────────────────
+
+# Hosts of the official package registries. An install that points anywhere
+# else is a supply-chain attack (dependency confusion / registry hijack).
+# TestPyPI is not listed: it is a separate index that anyone can upload to,
+# so an install pointed there is an override like any other. GitHub Packages
+# (npm.pkg.github.com) is not listed either: it is a separate registry that
+# needs its own namespace and authentication for a later install.
+_OFFICIAL_REGISTRY_HOSTS = {
+    "pypi.org",
+    "files.pythonhosted.org",
+    "pypi.python.org",
+    "registry.npmjs.org",
+    "registry.yarnpkg.com",
+}
+
+# Official-looking hosts that hold a separate index, so an install pointed
+# there is an override: TestPyPI has its own database and anyone can publish
+# to it.
+_UNTRUSTED_REGISTRY_HOSTS = {"test.pypi.org"}
+
+# Every whitespace run here is [ \t] rather than \s: \s matches newlines, so a
+# pattern anchored with ^ would rescan the rest of the file from each blank
+# line, and 100,000 blank lines would stall a scan.
+_REGISTRY_URL_PATTERNS = [
+    r"(?:--index-url|--extra-index-url)[ \t]*[= \t][ \t]*['\"]?(https?://[^\s'\"`]+)",
+    r"pip[ \t]+config[ \t]+set[ \t]+\S*index-url[ \t]+['\"]?(https?://[^\s'\"`]+)",
+    r"PIP_(?:EXTRA_)?INDEX_URL[ \t]*=[ \t]*['\"]?(https?://[^\s'\"`]+)",
+    r"npm[ \t]+config[ \t]+set[ \t]+(?:[^\s:]+:)?registry[ \t]+['\"]?(https?://[^\s'\"`]+)",
+    r"--registry[ \t]*[= \t][ \t]*['\"]?(https?://[^\s'\"`]+)",
+    r"yarn[ \t]+config[ \t]+set[ \t]+(?:npmScopes\.[^ \t]+\.)?npmRegistryServer[ \t]+['\"]?(https?://[^\s'\"`]+)",
+]
+
+# pip's short flag is a single letter, so it only overrides the registry on a
+# pip install command; "curl -i" and "grep -i" take the same flag and are
+# clean. A shell separator ends the command, so the scan stops there instead
+# of running to the end of the line and picking up a later "curl -i".
+_PIP_INSTALL = re.compile(r"\bpip3?[ \t]+install\b", re.IGNORECASE)
+_PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`]+)")
+_SHELL_SEPARATORS = ";|&\n"
+
+
+def _pip_short_flag_matches(text: str) -> list[tuple[str, str]]:
+    """Return (snippet, url) for every "pip install -i" registry override."""
+    matches: list[tuple[str, str]] = []
+    # Walk each line once and cut it into commands, so a line with many
+    # "pip install" tokens is still scanned in linear time.
+    for line in text.splitlines(keepends=True):
+        start = 0
+        for index, char in enumerate(line):
+            if char not in _SHELL_SEPARATORS:
+                continue
+            matches.extend(_command_pip_short_flag_matches(line[start:index]))
+            start = index + 1
+        matches.extend(_command_pip_short_flag_matches(line[start:]))
+    return matches
+
+
+def _command_pip_short_flag_matches(command: str) -> list[tuple[str, str]]:
+    """Return the "-i" registry overrides of one shell command."""
+    install = _PIP_INSTALL.search(command)
+    if install is None:
+        return []
+    return [
+        (match.group(0).strip(), match.group(1))
+        for match in _PIP_SHORT_I.finditer(command, install.end())
+    ]
+
+
+def _is_official_registry(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        # urlparse rejects some URLs outright, such as an unclosed IPv6 bracket.
+        # Such a host is not the official registry, and it must not abort the
+        # whole check: the other registry overrides in the file still count.
+        return False
+    if host in _UNTRUSTED_REGISTRY_HOSTS:
+        return False
+    return host in _OFFICIAL_REGISTRY_HOSTS or any(
+        host.endswith("." + official) for official in _OFFICIAL_REGISTRY_HOSTS
+    )
+
+
+def _check_untrusted_registry(text: str) -> list[str]:
+    hits: list[str] = []
+    for pattern in _REGISTRY_URL_PATTERNS:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            if not _is_official_registry(match.group(1)):
+                hits.append(match.group(0).strip())
+
+    # A pip.conf / .npmrc / .pypirc line that sets the registry directly
+    # (index-url = ..., registry=..., npmRegistryServer: ...). This catches the
+    # config-file route without tripping on a documentation link.
+    for snippet, url in _pip_short_flag_matches(text):
+        if not _is_official_registry(url):
+            hits.append(snippet)
+
+    ini_pattern = (
+        r"(?im)^[ \t]*(?:(?:@[^ \t:\r\n]+:)?registry|index[-_]url|extra[-_]index[-_]url|npmRegistryServer)"
+        r"[ \t]*[:=][ \t]*['\"]?(https?://[^\s'\"`]+)"
+    )
+    for match in re.finditer(ini_pattern, text):
+        if not _is_official_registry(match.group(1)):
+            hits.append(match.group(0).strip())
+
+    # .pypirc sets its upload target as "repository = ..." or, as twine also
+    # accepts, "repository: ...". Only an assignment inside a [section] is a
+    # registry override, so a documentation line such as
+    # "Repository: https://github.com/example/project" (outside any section) does
+    # not match.
+    pypirc_sections = {"distutils", "pypi", "testpypi", "server-login"}
+    current_section: str | None = None
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            name = stripped[1:-1].strip().lower()
+            current_section = name if name in pypirc_sections else None
+            continue
+        if current_section is None:
+            continue
+        match = re.match(
+            r"(?i)^[ \t]*repository[ \t]*[:=][ \t]*['\"]?(https?://[^\s'\"`]+)",
+            raw_line,
+        )
+        if match and not _is_official_registry(match.group(1)):
+            hits.append(match.group(0).strip())
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for hit in hits:
+        if hit in seen:
+            continue
+        seen.add(hit)
+        unique.append(hit)
+    return unique
+
+
+RULE_PACKAGE_REGISTRY = Rule(
+    id="SG-013",
+    name="Untrusted Package Registry",
+    severity=Severity.HIGH,
+    description=(
+        "The skill points pip, npm or yarn at a package registry other than the "
+        "official one (--index-url, --registry, npm/yarn config, or a pip.conf, "
+        ".npmrc or .pypirc override). A later install then pulls the attacker's "
+        "packages -- dependency confusion / supply-chain compromise (OWASP AST02). "
+        "Trail of Bits reported this bypass in the CSA review of skill scanners."
+    ),
+    remediation=(
+        "Install from the official registries only: pypi.org for pip and "
+        "registry.npmjs.org for npm. Remove --index-url, --extra-index-url, "
+        "-i, --registry and npm/yarn config overrides, and remove registry lines "
+        "from pip.conf, .npmrc or .pypirc that point anywhere else."
+    ),
+    check_fn=_check_untrusted_registry,
+    tags=["registry", "supply-chain", "dependency-confusion", "owasp-ast02"],
+)
+
+
 # ── All rules ──────────────────────────────────────────────────
 
 ALL_RULES: list[Rule] = [
@@ -488,4 +649,5 @@ ALL_RULES: list[Rule] = [
     RULE_COVERT_CHANNEL,
     RULE_SOCIAL_ENG,
     RULE_SUSPICIOUS_URLS,
+    RULE_PACKAGE_REGISTRY,
 ]

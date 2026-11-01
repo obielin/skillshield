@@ -82,7 +82,6 @@ KNOWN_GAPS = {
     "23-unicode-tag-smuggling": "instruction hidden in invisible Unicode tag characters (#54)",
     "25-remote-instructions": "fetches instructions from a URL at run time and follows them (#52)",
     "26-seed-phrase-harvest": "asks for a crypto wallet recovery phrase (#53)",
-    "27-registry-hijack": "points pip or npm at an untrusted package registry (#46)",
     "30-non-english-injection": "instruction override in a language other than English (#66)",
     "31-trifecta-reworded": "lethal trifecta depends on the English injection phrases (#67)",
 }
