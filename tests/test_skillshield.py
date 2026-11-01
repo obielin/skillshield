@@ -518,6 +518,21 @@ class TestSkillScanner:
         result = scanner.scan_text(IDENTITY_SKILL)
         assert any(f.rule_id == "SG-004" for f in result.findings)
 
+    def test_single_high_finding_is_high(self, scanner):
+        result = scanner.scan_text(IDENTITY_SKILL)
+        assert result.risk_score == 20
+        assert result.risk_level == "HIGH"
+
+    def test_single_medium_finding_is_medium(self, scanner):
+        result = scanner.scan_text(SUSPICIOUS_URL_SKILL)
+        assert result.risk_score == 10
+        assert result.risk_level == "MEDIUM"
+
+    def test_two_high_findings_stay_high(self, scanner):
+        result = scanner.scan_text(IDENTITY_SKILL + SECRET_SKILL)
+        assert result.risk_score == 40
+        assert result.risk_level == "HIGH"
+
     def test_secret_detected(self, scanner):
         result = scanner.scan_text(SECRET_SKILL)
         assert any(f.rule_id == "SG-005" for f in result.findings)
@@ -759,6 +774,11 @@ class TestUnreadableFiles:
         target = tmp_path / "a.md"
         target.write_text(CLEAN_SKILL)
         assert _run_cli(monkeypatch, "scan", str(target)) == 0
+
+    def test_single_high_finding_exits_1(self, tmp_path, monkeypatch):
+        target = tmp_path / "a.md"
+        target.write_text(IDENTITY_SKILL)
+        assert _run_cli(monkeypatch, "scan", str(target)) == 1
 
     def test_batch_report_keeps_errors_out_of_flagged(self, tmp_path, monkeypatch):
         (tmp_path / "a.md").write_text(CLEAN_SKILL)

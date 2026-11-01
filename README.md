@@ -258,6 +258,8 @@ The risk level comes from the findings and the score:
 | Score 0 | SAFE |
 | The file could not be read | ERROR |
 
+The level is also never lower than the worst single finding: one HIGH finding is HIGH (20 points on its own), one MEDIUM finding is MEDIUM, one LOW finding is LOW. INFO findings stay informational.
+
 `--min-severity` removes findings before the score is worked out, so it changes the score and the level.
 
 ---

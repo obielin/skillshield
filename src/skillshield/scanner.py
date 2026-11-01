@@ -19,6 +19,15 @@ _SEVERITY_WEIGHTS = {
     Severity.INFO: 1,
 }
 
+# The level each finding severity sets as a floor. INFO stays informational.
+_SEVERITY_LEVEL = {
+    Severity.CRITICAL: "CRITICAL",
+    Severity.HIGH: "HIGH",
+    Severity.MEDIUM: "MEDIUM",
+    Severity.LOW: "LOW",
+}
+_LEVEL_RANK = {"SAFE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+
 # Skill file extensions supported
 SKILL_EXTENSIONS = {
     ".md",
@@ -47,15 +56,21 @@ def _compute_risk_score(findings: list[Finding]) -> float:
 
 def _risk_level(score: float, findings: list[Finding]) -> str:
     """Derive risk level from score and findings."""
-    if any(f.severity == Severity.CRITICAL for f in findings):
-        return "CRITICAL"
     if score >= 40:
-        return "HIGH"
-    if score >= 20:
-        return "MEDIUM"
-    if score > 0:
-        return "LOW"
-    return "SAFE"
+        level = "HIGH"
+    elif score >= 20:
+        level = "MEDIUM"
+    elif score > 0:
+        level = "LOW"
+    else:
+        level = "SAFE"
+    # The score alone reports one HIGH finding as MEDIUM, so the worst single
+    # finding is a floor. INFO findings stay informational.
+    for finding in findings:
+        floor = _SEVERITY_LEVEL.get(finding.severity)
+        if floor and _LEVEL_RANK[floor] > _LEVEL_RANK[level]:
+            level = floor
+    return level
 
 
 def _find_line_numbers(text: str, snippet: str) -> list[int]:

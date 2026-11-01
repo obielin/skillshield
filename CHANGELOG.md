@@ -20,6 +20,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - A directory scan names each file by its path relative to the scanned directory (for example `a/SKILL.md`), with forward slashes, in text, JSON and SARIF output. Before, it used the file name only, so SARIF results for several `SKILL.md` files all pointed at `SKILL.md` (#24).
 
+### Fixed
+
+- A file's reported level is now at least the severity of its worst single finding, so one HIGH finding can no longer be diluted to MEDIUM by the file's other content; `skillshield.ci` exits non-zero when that file alone breaches the `fail-on` gate (issue #25).
+
 ## [1.2.0]
 
 ### Added

@@ -47,35 +47,6 @@ def _rank(level: str) -> int:
     return LEVELS.index(level) if level in LEVELS else -1
 
 
-# The level a single finding of each severity sets as a floor. INFO findings
-# are informational and never raise the level on their own.
-_SEVERITY_FLOOR = {
-    Severity.CRITICAL: "CRITICAL",
-    Severity.HIGH: "HIGH",
-    Severity.MEDIUM: "MEDIUM",
-    Severity.LOW: "LOW",
-    Severity.INFO: "SAFE",
-}
-
-
-def effective_level(result: SkillScanResult) -> str:
-    """
-    The higher of the file's risk level and its worst single finding.
-
-    The scanner's risk level comes from the summed score, so one HIGH finding
-    on its own scores as MEDIUM. A CI gate must not let that through, so the
-    gate uses the worst finding as a floor.
-    """
-    if result.risk_level == "ERROR":
-        return "ERROR"
-    level = result.risk_level
-    for f in result.findings:
-        floor = _SEVERITY_FLOOR.get(f.severity, "SAFE")
-        if _rank(floor) > _rank(level):
-            level = floor
-    return level
-
-
 def _relative(path: Path, workspace: Path) -> str:
     try:
         return path.resolve().relative_to(workspace.resolve()).as_posix()
@@ -123,7 +94,7 @@ def decide(results: list[SkillScanResult], missing: list[str], fail_on: str | No
     if fail_on is None:
         return 0
     threshold = _rank(fail_on)
-    return 1 if any(_rank(effective_level(r)) >= threshold for r in results) else 0
+    return 1 if any(_rank(r.risk_level) >= threshold for r in results) else 0
 
 
 def highest_level(results: list[SkillScanResult]) -> str:
@@ -131,7 +102,7 @@ def highest_level(results: list[SkillScanResult]) -> str:
     read = [r for r in results if r.risk_level != "ERROR"]
     if not read:
         return "SAFE"
-    return max((effective_level(r) for r in read), key=_rank)
+    return max((r.risk_level for r in read), key=_rank)
 
 
 def summary_markdown(
@@ -157,11 +128,9 @@ def summary_markdown(
     ]
     if flagged:
         lines += ["| File | Risk | Score | Findings |", "|---|---|---|---|"]
-        for r in sorted(flagged, key=lambda r: (-_rank(effective_level(r)), r.skill_name)):
+        for r in sorted(flagged, key=lambda r: (-_rank(r.risk_level), r.skill_name)):
             ids = ", ".join(f.rule_id for f in r.findings)
-            lines.append(
-                f"| `{r.skill_name}` | {effective_level(r)} | {r.risk_score:.0f} | {ids} |"
-            )
+            lines.append(f"| `{r.skill_name}` | {r.risk_level} | {r.risk_score:.0f} | {ids} |")
         lines.append("")
     for r in errors:
         lines.append(f"- Could not read `{r.skill_name}`: {r.error}")
@@ -180,7 +149,7 @@ def console_report(results: list[SkillScanResult], missing: list[str], exit_code
             )
         elif r.risk_level != "SAFE":
             ids = ", ".join(f"{f.rule_id} {f.name}" for f in r.findings)
-            level = effective_level(r)
+            level = r.risk_level
             kind = "error" if exit_code == 1 and level in ("HIGH", "CRITICAL") else "warning"
             line = r.findings[0].line_numbers[0] if r.findings and r.findings[0].line_numbers else 1
             lines.append(
