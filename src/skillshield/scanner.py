@@ -52,16 +52,39 @@ COMPILED_PYTHON_EXTENSIONS = {".pyc", ".pyo"}
 # Directories that hold tooling or dependencies, never skills the repo ships.
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache"}
 
+_LOCAL_ENV_NAMES = {"venv", ".venv"}
+
+
+def _dir_is_skipped(directory: Path, *, allow_pycache: bool = False) -> bool:
+    """Whether a directory is tooling rather than skill content.
+
+    A venv name alone proves nothing: a skill can ship its own .venv/ to hide
+    bytecode from the scanner. Only a directory that carries pyvenv.cfg next
+    to its interpreter is a real local environment; anything else is scanned.
+    """
+    name = directory.name
+    if name not in SKIP_DIRS:
+        return False
+    if name == "__pycache__":
+        return not allow_pycache
+    if name in _LOCAL_ENV_NAMES and not (directory / "pyvenv.cfg").is_file():
+        return False
+    return True
+
 
 def _compiled_collectable(path: Path, base: Path) -> bool:
     """Whether a compiled path belongs in a directory scan.
 
     __pycache__ is where a shipped .pyc lives, so it is no reason to skip; a
-    vendored .venv or node_modules still is. Mirrors the CI gate, so the
-    directory scan and scan_paths agree on the same project root.
+    verified local environment or node_modules still is. Mirrors the CI gate,
+    so the directory scan and scan_paths agree on the same project root.
     """
-    relative_dirs = path.relative_to(base).parts[:-1]
-    return not (SKIP_DIRS.intersection(relative_dirs) - {"__pycache__"})
+    current = base
+    for part in path.relative_to(base).parts[:-1]:
+        current = current / part
+        if _dir_is_skipped(current, allow_pycache=True):
+            return False
+    return True
 
 
 def compiled_source_path(path: Path) -> Path:
@@ -286,13 +309,15 @@ class SkillScanner:
         # A compiled file asked for through extensions already reaches
         # scan_file, which dispatches to the compiled check; collecting it
         # here as well would report the same file twice.
-        compiled = [
-            p
-            for p in all_files
-            if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS
-            and p.suffix.lower() not in exts
-            and _compiled_collectable(p, base)
-        ]
+        compiled: list[Path] = []
+        unscanned: list[str] = []
+        for p in all_files:
+            if p.suffix.lower() not in COMPILED_PYTHON_EXTENSIONS or p.suffix.lower() in exts:
+                continue
+            if _compiled_collectable(p, base):
+                compiled.append(p)
+            else:
+                unscanned.append(p.relative_to(base).as_posix())
 
         self._log(f"  Found {len(paths)} skill files in {directory}")
         results: list[SkillScanResult] = []
@@ -310,7 +335,8 @@ class SkillScanner:
             on_progress and on_progress(name, i + 1, total)
             results.append(self._scan_compiled_file(path, base))
 
-        return BatchScanReport(results=results)
+        metadata = {"unscanned": unscanned} if unscanned else {}
+        return BatchScanReport(results=results, metadata=metadata)
 
     def scan_texts(
         self,

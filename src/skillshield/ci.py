@@ -33,8 +33,8 @@ from skillshield.sarif import results_to_sarif
 from skillshield.scanner import (
     COMPILED_PYTHON_EXTENSIONS,
     SKILL_EXTENSIONS,
-    SKIP_DIRS,
     SkillScanner,
+    _dir_is_skipped,
 )
 
 LEVELS = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
@@ -63,14 +63,16 @@ def _is_scanned(path: Path, root: Path) -> bool:
     Compiled Python is collected wherever it sits: a .pyc is the thing a
     reader skips, and its usual home, __pycache__, is in SKIP_DIRS.
     """
-    relative_dirs = path.relative_to(root).parts[:-1]
     suffix = path.suffix.lower()
-    blocked = SKIP_DIRS.intersection(relative_dirs) - {"__pycache__"}
-    if suffix in COMPILED_PYTHON_EXTENSIONS:
-        # __pycache__ is where a shipped .pyc lives, so it is no reason to
-        # skip; a vendored .venv or node_modules still is.
-        return not blocked
-    return suffix in SKILL_EXTENSIONS and not SKIP_DIRS.intersection(relative_dirs)
+    compiled = suffix in COMPILED_PYTHON_EXTENSIONS
+    current = root
+    for part in path.relative_to(root).parts[:-1]:
+        current = current / part
+        if _dir_is_skipped(current, allow_pycache=compiled):
+            return False
+    # __pycache__ is where a shipped .pyc lives, so it is no reason to skip a
+    # compiled file; a verified local environment or node_modules still is.
+    return compiled or suffix in SKILL_EXTENSIONS
 
 
 def scan_paths(

@@ -935,9 +935,25 @@ class TestCompiledPythonPayload:
         site = tmp_path / ".venv" / "lib" / "python3.12" / "site-packages" / "pkg" / "__pycache__"
         site.mkdir(parents=True)
         (site / "x.cpython-312.pyc").write_bytes(b"bytecode")
+        (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
         (tmp_path / "tool.pyc").write_bytes(b"bytecode")
         report = SkillScanner().scan_directory(tmp_path)
         assert [r.skill_name for r in report.results] == ["tool.pyc"]
+        assert report.metadata["unscanned"] == [
+            ".venv/lib/python3.12/site-packages/pkg/__pycache__/x.cpython-312.pyc"
+        ]
+        assert "UNSCANNED (1)" in report.summary()
+
+    def test_a_shipped_dot_venv_without_pyvenv_cfg_is_scanned(self, tmp_path):
+        # The name alone does not make a local environment: this .venv ships
+        # with the skill and must not hide its bytecode.
+        site = tmp_path / ".venv" / "bin"
+        site.mkdir(parents=True)
+        (site / "payload.pyc").write_bytes(b"bytecode")
+        report = SkillScanner().scan_directory(tmp_path)
+        assert [r.skill_name for r in report.results] == [".venv/bin/payload.pyc"]
+        assert report.results[0].findings[0].rule_id == "SG-014"
+        assert report.metadata == {}
 
     def test_progress_callback_includes_compiled_files(self, tmp_path):
         (tmp_path / "tool.pyc").write_bytes(b"bytecode")
@@ -977,14 +993,19 @@ class TestCompiledPythonPayload:
         vendored = tmp_path / ".venv" / "lib" / "site-packages" / "pkg" / "__pycache__"
         vendored.mkdir(parents=True)
         (vendored / "tool.cpython-310.pyc").write_bytes(b"bytecode")
+        (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
         shipped = tmp_path / "scripts" / "__pycache__"
         shipped.mkdir(parents=True)
         (shipped / "helper.cpython-310.pyc").write_bytes(b"bytecode")
+        planted = tmp_path / "skills" / ".venv" / "bin"
+        planted.mkdir(parents=True)
+        (planted / "hidden.pyc").write_bytes(b"bytecode")
         results, missing = scan_paths(["."], tmp_path)
         assert missing == []
         names = [r.skill_name for r in results]
         assert "scripts/__pycache__/helper.cpython-310.pyc" in names
-        assert not [name for name in names if ".venv" in name]
+        assert "skills/.venv/bin/hidden.pyc" in names
+        assert not [name for name in names if name.startswith(".venv/")]
 
     def test_a_compiled_file_with_its_source_gets_no_note(self, tmp_path):
         from skillshield.ci import scan_paths

@@ -112,6 +112,7 @@ def test_tooling_directories_are_skipped(tmp_path):
     for d in (".git", "node_modules", ".venv"):
         (tmp_path / d).mkdir()
         (tmp_path / d / "notes.md").write_text(RISKY)
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
     (tmp_path / ".claude" / "skills").mkdir(parents=True)
     (tmp_path / ".claude" / "skills" / "SKILL.md").write_text("hello")
     results, _ = ci.scan_paths(["."], tmp_path)
