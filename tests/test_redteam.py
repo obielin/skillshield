@@ -134,7 +134,6 @@ def test_safe_sample_is_not_flagged(path):
 # that is reported, once that exists): file -> what is missing.
 SKILL_FOLDER = CORPUS / "skill-folder"
 FOLDER_GAPS = {
-    "scripts/format.pyc": "compiled Python is skipped without being reported (#42)",
     "scripts/install": "script without an extension is skipped (no shebang check) (#40)",
     "scripts/setup.ps1": "PowerShell scripts are skipped (#40)",
     "helper.zip": "password-protected archive is skipped (#41)",
@@ -153,4 +152,23 @@ FOLDER_GAPS = {
 def test_payload_file_in_skill_folder_is_flagged(name):
     report = SkillScanner().scan_directory(SKILL_FOLDER)
     flagged = {r.skill_name for r in report.results if r.findings or r.risk_level == "ERROR"}
-    assert Path(name).name in flagged, f"{name} was not flagged; flagged: {sorted(flagged)}"
+    assert name in flagged, f"{name} was not flagged; flagged: {sorted(flagged)}"
+
+
+def test_compiled_python_in_skill_folder_is_flagged():
+    report = SkillScanner().scan_directory(SKILL_FOLDER)
+    results = {r.skill_name: r for r in report.results}
+    assert "scripts/format.pyc" in results, f"format.pyc missing; got {sorted(results)}"
+    assert results["scripts/format.pyc"].findings
+    finding = results["scripts/format.pyc"].findings[0]
+    assert finding.rule_id == "SG-014"
+    assert finding.severity == Severity.HIGH
+    assert "no matching format.py" in finding.snippets[0]
+
+
+def test_a_text_file_whose_name_mentions_pyc_is_not_bytecode(tmp_path):
+    (tmp_path / "tool.pyc.txt").write_text("notes about a build\n", encoding="utf-8")
+    report = SkillScanner().scan_directory(tmp_path)
+    results = {r.skill_name: r for r in report.results}
+    assert "tool.pyc.txt" in results
+    assert results["tool.pyc.txt"].findings == []

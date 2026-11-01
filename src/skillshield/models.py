@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from skillshield.rules import Rule, Severity
+from skillshield.rules import RULE_COMPILED_PYTHON, Rule, Severity
 
 
 @dataclass
@@ -96,6 +96,21 @@ class SkillScanResult:
         )
 
 
+def missing_source_note(result: SkillScanResult) -> str:
+    """Say which compiled file in a result has no .py source beside it.
+
+    The compiled check carries the note as the finding snippet, which the
+    text and JSON output already print; the batch summary and SARIF need it
+    spelled out separately.
+    """
+    for finding in result.findings:
+        if finding.rule_id != RULE_COMPILED_PYTHON.id or not finding.snippets:
+            continue
+        if "(no matching " in finding.snippets[0]:
+            return finding.snippets[0]
+    return ""
+
+
 @dataclass
 class BatchScanReport:
     """
@@ -171,6 +186,9 @@ class BatchScanReport:
                     lines.append(f"    [{r.risk_score:.0f}] {r.skill_name}")
                     for f in r.findings[:2]:
                         lines.append(f"         -> {f.rule_id}: {f.name}")
+                    note = missing_source_note(r)
+                    if note:
+                        lines.append(f"         -> {note}")
                 if len(by_level.get(level, [])) > 5:
                     lines.append(f"    ... and {len(by_level[level]) - 5} more")
 

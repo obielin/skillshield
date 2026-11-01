@@ -13,8 +13,8 @@ import json
 from typing import Any
 
 from skillshield import __version__
-from skillshield.models import BatchScanReport, SkillScanResult
-from skillshield.rules import ALL_RULES, Rule, Severity
+from skillshield.models import BatchScanReport, SkillScanResult, missing_source_note
+from skillshield.rules import ALL_RULES, RULE_COMPILED_PYTHON, Rule, Severity
 
 _SARIF_SCHEMA = (
     "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
@@ -98,6 +98,9 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
                 f"{finding.name}: {finding.rule.description}"
                 f" — Remediation: {finding.rule.remediation}"
             )
+            note = missing_source_note(scan_result)
+            if note and finding.rule_id == RULE_COMPILED_PYTHON.id:
+                message_text = f"{message_text} - {note}"
 
             locations: list[dict[str, Any]] = []
             # Emit one location per matched line number (up to 5 — matches the

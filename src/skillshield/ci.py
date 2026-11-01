@@ -30,7 +30,11 @@ from pathlib import Path
 from skillshield.models import SkillScanResult
 from skillshield.rules import Severity
 from skillshield.sarif import results_to_sarif
-from skillshield.scanner import SKILL_EXTENSIONS, SkillScanner
+from skillshield.scanner import (
+    COMPILED_PYTHON_EXTENSIONS,
+    SKILL_EXTENSIONS,
+    SkillScanner,
+)
 
 LEVELS = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 FAIL_ON = {"none": None, "low": "LOW", "medium": "MEDIUM", "high": "HIGH", "critical": "CRITICAL"}
@@ -54,6 +58,22 @@ def _relative(path: Path, workspace: Path) -> str:
         return path.as_posix()
 
 
+def _is_scanned(path: Path, root: Path) -> bool:
+    """Whether a file under root belongs in a CI scan.
+
+    Compiled Python is collected wherever it sits: a .pyc is the thing a
+    reader skips, and its usual home, __pycache__, is in SKIP_DIRS.
+    """
+    relative_dirs = path.relative_to(root).parts[:-1]
+    suffix = path.suffix.lower()
+    blocked = SKIP_DIRS.intersection(relative_dirs) - {"__pycache__"}
+    if suffix in COMPILED_PYTHON_EXTENSIONS:
+        # __pycache__ is where a shipped .pyc lives, so it is no reason to
+        # skip; a vendored .venv or node_modules still is.
+        return not blocked
+    return suffix in SKILL_EXTENSIONS and not SKIP_DIRS.intersection(relative_dirs)
+
+
 def scan_paths(
     paths: list[str], workspace: Path, min_severity: Severity = Severity.INFO
 ) -> tuple[list[SkillScanResult], list[str]]:
@@ -66,13 +86,7 @@ def scan_paths(
         if not p.is_absolute():
             p = workspace / p
         if p.is_dir():
-            files = sorted(
-                f
-                for f in p.rglob("*")
-                if f.is_file()
-                and f.suffix.lower() in SKILL_EXTENSIONS
-                and not SKIP_DIRS.intersection(f.relative_to(p).parts[:-1])
-            )
+            files = sorted(f for f in p.rglob("*") if f.is_file() and _is_scanned(f, p))
         elif p.is_file():
             files = [p]
         else:
