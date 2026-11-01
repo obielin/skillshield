@@ -49,6 +49,20 @@ SKILL_EXTENSIONS = {
 # Compiled Python that Python runs directly but a text scanner cannot read.
 COMPILED_PYTHON_EXTENSIONS = {".pyc", ".pyo"}
 
+# Directories that hold tooling or dependencies, never skills the repo ships.
+SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache"}
+
+
+def _compiled_collectable(path: Path, base: Path) -> bool:
+    """Whether a compiled path belongs in a directory scan.
+
+    __pycache__ is where a shipped .pyc lives, so it is no reason to skip; a
+    vendored .venv or node_modules still is. Mirrors the CI gate, so the
+    directory scan and scan_paths agree on the same project root.
+    """
+    relative_dirs = path.relative_to(base).parts[:-1]
+    return not (SKIP_DIRS.intersection(relative_dirs) - {"__pycache__"})
+
 
 def compiled_source_path(path: Path) -> Path:
     """The source file a .pyc or .pyo was compiled from.
@@ -229,12 +243,11 @@ class SkillScanner:
         if not source.exists():
             snippet = f"{name} (no matching {source.name}; ship the source instead)"
         findings: list[Finding] = []
-        if self._has_rule(RULE_COMPILED_PYTHON) and not self._below_min_severity(
-            RULE_COMPILED_PYTHON.severity
-        ):
-            findings.append(
-                Finding(rule=RULE_COMPILED_PYTHON, snippets=[snippet], line_numbers=[1])
-            )
+        configured_rule = next(
+            (rule for rule in self.rules if rule.id == RULE_COMPILED_PYTHON.id), None
+        )
+        if configured_rule is not None and not self._below_min_severity(configured_rule.severity):
+            findings.append(Finding(rule=configured_rule, snippets=[snippet], line_numbers=[1]))
         score = _compute_risk_score(findings)
         return SkillScanResult(
             skill_name=name,
@@ -276,20 +289,25 @@ class SkillScanner:
         compiled = [
             p
             for p in all_files
-            if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS and p.suffix.lower() not in exts
+            if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS
+            and p.suffix.lower() not in exts
+            and _compiled_collectable(p, base)
         ]
 
         self._log(f"  Found {len(paths)} skill files in {directory}")
         results: list[SkillScanResult] = []
+        total = len(paths) + len(compiled)
 
         for i, path in enumerate(paths):
             name = path.relative_to(base).as_posix()
-            on_progress and on_progress(name, i + 1, len(paths))
+            on_progress and on_progress(name, i + 1, total)
             result = self.scan_file(path)
             result.skill_name = name
             results.append(result)
 
-        for path in compiled:
+        for i, path in enumerate(compiled, start=len(paths)):
+            name = path.relative_to(base).as_posix()
+            on_progress and on_progress(name, i + 1, total)
             results.append(self._scan_compiled_file(path, base))
 
         return BatchScanReport(results=results)
@@ -316,10 +334,6 @@ class SkillScanner:
             self._log(f"  Scanning {name} ({i + 1}/{len(names)})...")
             results.append(self.scan_text(skills[name], name=name))
         return BatchScanReport(results=results)
-
-    def _has_rule(self, rule: Rule) -> bool:
-        """Whether this scanner set includes the rule, by id."""
-        return any(r.id == rule.id for r in self.rules)
 
     def _below_min_severity(self, severity: Severity) -> bool:
         order = {s: i for i, s in enumerate(self._severity_order)}

@@ -931,6 +931,39 @@ class TestCompiledPythonPayload:
         flagged = [r for r in results if any(f.rule_id == "SG-014" for f in r.findings)]
         assert [r.skill_name for r in flagged] == ["__pycache__/tool.cpython-310.pyc"]
 
+    def test_directory_scan_skips_venv_bytecode(self, tmp_path):
+        site = tmp_path / ".venv" / "lib" / "python3.12" / "site-packages" / "pkg" / "__pycache__"
+        site.mkdir(parents=True)
+        (site / "x.cpython-312.pyc").write_bytes(b"bytecode")
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        report = SkillScanner().scan_directory(tmp_path)
+        assert [r.skill_name for r in report.results] == ["tool.pyc"]
+
+    def test_progress_callback_includes_compiled_files(self, tmp_path):
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        seen: list[tuple[str, int, int]] = []
+        report = SkillScanner().scan_directory(
+            tmp_path, on_progress=lambda name, done, total: seen.append((name, done, total))
+        )
+        assert [r.skill_name for r in report.results] == ["tool.pyc"]
+        assert seen == [("tool.pyc", 1, 1)]
+
+    def test_configured_sg014_rule_is_used_for_filtering_and_finding(self, tmp_path):
+        from dataclasses import replace
+
+        from skillshield.rules import RULE_COMPILED_PYTHON
+
+        target = tmp_path / "tool.pyc"
+        target.write_bytes(b"bytecode")
+        custom = replace(
+            RULE_COMPILED_PYTHON, severity=Severity.INFO, name="Custom compiled Python"
+        )
+        quiet = SkillScanner(rules=[custom], min_severity=Severity.HIGH).scan_file(target)
+        assert quiet.findings == []
+        loud = SkillScanner(rules=[custom], min_severity=Severity.INFO).scan_file(target)
+        assert loud.findings[0].rule is custom
+        assert loud.findings[0].severity == Severity.INFO
+
     def test_a_single_pyo_is_flagged_like_a_pyc(self, tmp_path):
         target = tmp_path / "skill.pyo"
         target.write_bytes(b"bytecode")

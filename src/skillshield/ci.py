@@ -33,14 +33,13 @@ from skillshield.sarif import results_to_sarif
 from skillshield.scanner import (
     COMPILED_PYTHON_EXTENSIONS,
     SKILL_EXTENSIONS,
+    SKIP_DIRS,
     SkillScanner,
 )
 
 LEVELS = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 FAIL_ON = {"none": None, "low": "LOW", "medium": "MEDIUM", "high": "HIGH", "critical": "CRITICAL"}
 SEVERITIES = {s.value.lower(): s for s in Severity}
-# Directories that hold tooling or dependencies, never skills the repo ships.
-SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache"}
 
 
 class SettingError(ValueError):
