@@ -7,6 +7,7 @@ Zero external dependencies -- pure Python stdlib.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
@@ -258,6 +259,9 @@ RULE_SCOPE_CREEP = Rule(
 # ── SG-008: Obfuscation ────────────────────────────────────────
 
 
+_BIDI_CONTROL_RE = re.compile("[\u202a-\u202e\u2066-\u2069]")
+
+
 def _check_obfuscation(text: str) -> list[str]:
     matches = []
     # Base64 encoded blocks (>100 chars of b64 chars)
@@ -280,6 +284,16 @@ def _check_obfuscation(text: str) -> list[str]:
     for m in rot_re.finditer(text):
         matches.append(m.group(0))
 
+    # Bidirectional control characters reorder displayed text (Trojan Source,
+    # CVE-2021-42574). Plain Arabic or Hebrew text does not need them.
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        found = _BIDI_CONTROL_RE.findall(line)
+        if not found:
+            continue
+        shown = _BIDI_CONTROL_RE.sub(lambda m: f"<U+{ord(m.group(0)):04X}>", line.strip())
+        names = ", ".join(f"U+{ord(c):04X} {unicodedata.name(c)}" for c in dict.fromkeys(found))
+        matches.append(f"{shown[:120]} [line {lineno}: {names}]")
+
     return matches
 
 
@@ -290,11 +304,17 @@ RULE_OBFUSCATION = Rule(
     description=(
         "The skill contains heavily obfuscated content -- base64 blobs, hex encoding, "
         "or unicode escape sequences that conceal the actual instructions from "
-        "human reviewers. Snyk found obfuscation in 23% of flagged ToxicSkills."
+        "human reviewers. Snyk found obfuscation in 23% of flagged ToxicSkills. "
+        "Bidirectional control characters (U+202A-U+202E, U+2066-U+2069) make text "
+        "display in a different order from how it is stored, so a reviewer reads "
+        "something other than what the model reads (Trojan Source, CVE-2021-42574, "
+        "Boucher and Anderson)."
     ),
     remediation=(
         "All skill instructions must be human-readable. Obfuscated content "
-        "should be decoded and audited, or the skill should be rejected."
+        "should be decoded and audited, or the skill should be rejected. Remove "
+        "any bidirectional control characters; ordinary Arabic and Hebrew text "
+        "does not need them."
     ),
     check_fn=_check_obfuscation,
     tags=["obfuscation", "evasion", "supply-chain"],

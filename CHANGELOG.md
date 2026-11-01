@@ -14,6 +14,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - `docs/threat-coverage.md`: the attack techniques reported against agent skills in 2025–2026, with sources, and how far SkillShield covers each.
 - A Limitations section in the README.
 - SG-006 now flags base64 data decoded and piped into a shell (`base64 -d | bash` and similar), whatever the length of the encoded string (#43). The ClawHavoc campaign used this as its execution trigger.
+- SG-008 now flags bidirectional control characters (U+202A to U+202E and U+2066 to U+2069), which make text display in a different order from how it is stored (Trojan Source, CVE-2021-42574) (#55). The finding shows the line with each character as `<U+202E>`, and names the character and line.
 
 ### Fixed
 

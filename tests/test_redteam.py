@@ -80,7 +80,6 @@ KNOWN_GAPS = {
     "21-suppress-security-warnings": "tells the agent to hide security findings (#50)",
     "22-cross-tool-hijack": "instruction that changes how other tools run (#51)",
     "23-unicode-tag-smuggling": "instruction hidden in invisible Unicode tag characters (#54)",
-    "24-bidi-override": "right-to-left override characters hide what text says (#55)",
     "25-remote-instructions": "fetches instructions from a URL at run time and follows them (#52)",
     "26-seed-phrase-harvest": "asks for a crypto wallet recovery phrase (#53)",
     "27-registry-hijack": "points pip or npm at an untrusted package registry (#46)",
