@@ -83,7 +83,7 @@ def compiled_source_path(path: Path) -> Path:
         # .pyo in __pycache__, or a name source_from_cache will not take.
         # Keep the interpreter tag out of the guessed source name:
         # tool.cpython-310.pyo -> tool.py, not tool.cpython-310.py.
-        if path.parent.name == "__pycache__" and "." in path.stem:
+        if path.parent.name == "__pycache__":
             module = path.stem.split(".", 1)[0]
             return path.parent.parent / f"{module}.py"
         return path.with_suffix(".py")
@@ -251,7 +251,7 @@ class SkillScanner:
             )
         snippet = name
         source = compiled_source_path(path)
-        if not source.exists():
+        if not source.is_file():
             snippet = f"{name} (no matching {source.name}; ship the source instead)"
         findings: list[Finding] = []
         configured_rule = next(

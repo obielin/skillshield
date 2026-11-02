@@ -41,6 +41,12 @@ LEVELS = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 FAIL_ON = {"none": None, "low": "LOW", "medium": "MEDIUM", "high": "HIGH", "critical": "CRITICAL"}
 SEVERITIES = {s.value.lower(): s for s in Severity}
 
+# The job summary is written to GITHUB_STEP_SUMMARY, which GitHub Actions caps
+# at 1 MiB per step; an oversized summary fails to upload. A scan of a large
+# repository can skip thousands of files, so the summary shows a bounded sample
+# and keeps the total count.
+MAX_UNSCANNED_LISTED = 20
+
 
 class SettingError(ValueError):
     """A setting has a value SkillShield does not accept."""
@@ -170,8 +176,11 @@ def summary_markdown(
         lines.append(f"- Path does not exist: `{m}`")
     if unscanned:
         lines += ["Files not scanned:", ""]
-        for name in unscanned:
+        for name in unscanned[:MAX_UNSCANNED_LISTED]:
             lines.append(f"- `{name}`")
+        omitted = len(unscanned) - MAX_UNSCANNED_LISTED
+        if omitted > 0:
+            lines.append(f"- ... and {omitted} more, not listed here")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -181,6 +190,7 @@ def console_report(
     missing: list[str],
     exit_code: int,
     unscanned: list[str] | None = None,
+    sarif_file: str | None = None,
 ) -> str:
     """Plain text lines for the job log, with GitHub annotations for flagged files."""
     lines = []
@@ -200,9 +210,10 @@ def console_report(
     for m in missing:
         lines.append(f"::error::SkillShield: path does not exist: {m}")
     if unscanned:
+        where = "the job summary and SARIF report" if sarif_file else "the job summary"
         lines.append(
             f"::warning::SkillShield skipped {len(unscanned)} file(s) it could not scan; "
-            "they are listed in the job summary and SARIF report."
+            f"they are listed in {where}."
         )
     lines.append(
         f"SkillShield scanned {len(results)} file(s); highest risk level {highest_level(results)}."
@@ -250,7 +261,7 @@ def run(env: dict[str, str]) -> int:
         report = BatchScanReport(results=results, metadata={"unscanned": skipped})
         _write(s["sarif_file"], json.dumps(report_to_sarif(report), indent=2))
 
-    print(console_report(results, missing, exit_code, skipped))
+    print(console_report(results, missing, exit_code, skipped, s["sarif_file"]))
     _write(
         env.get("GITHUB_STEP_SUMMARY"),
         summary_markdown(results, missing, s["fail_on"], exit_code, skipped),

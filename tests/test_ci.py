@@ -126,6 +126,28 @@ def test_sarif_lists_every_file_the_scan_skipped(tmp_path):
     assert "`scripts/setup.ps1`" in summary
 
 
+def test_job_summary_bounds_the_unscanned_list(tmp_path):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    extra = 5
+    for i in range(ci.MAX_UNSCANNED_LISTED + extra):
+        (tmp_path / f"payload{i}.zip").write_bytes(b"PK\x03\x04")
+    ci.run(_env(tmp_path, paths="."))
+    summary = (tmp_path / "summary.md").read_text()
+    total = ci.MAX_UNSCANNED_LISTED + extra
+    assert f"| Unscanned files | {total} |" in summary
+    assert summary.count("- `payload") == ci.MAX_UNSCANNED_LISTED
+    assert f"... and {extra} more, not listed here" in summary
+
+
+def test_console_does_not_promise_a_sarif_report_that_is_not_written(tmp_path, capsys):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
+    ci.run(_env(tmp_path, paths="."))
+    out = capsys.readouterr().out
+    assert "::warning::SkillShield skipped 1 file(s)" in out
+    assert "SARIF" not in out
+
+
 def test_several_paths_one_per_line(tmp_path):
     (tmp_path / "one.md").write_text("hello")
     (tmp_path / "two.md").write_text(RISKY)

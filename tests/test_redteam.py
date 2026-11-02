@@ -130,8 +130,8 @@ def test_safe_sample_is_not_flagged(path):
 
 
 # Files in a skill folder that carry a payload SkillShield does not look at yet.
-# Each must appear in a directory scan with a finding (or as an unscanned file
-# that is reported, once that exists): file -> what is missing.
+# Each must either be flagged or be listed as unscanned by the directory scan:
+# file -> what is missing.
 SKILL_FOLDER = CORPUS / "skill-folder"
 FOLDER_GAPS = {
     "scripts/install": "script without an extension is skipped (no shebang check) (#40)",
@@ -153,6 +153,21 @@ def test_payload_file_in_skill_folder_is_flagged(name):
     report = SkillScanner().scan_directory(SKILL_FOLDER)
     flagged = {r.skill_name for r in report.results if r.findings or r.risk_level == "ERROR"}
     assert name in flagged, f"{name} was not flagged; flagged: {sorted(flagged)}"
+
+
+def test_payload_files_with_no_scanned_extension_are_reported_as_unscanned():
+    report = SkillScanner().scan_directory(SKILL_FOLDER)
+    unscanned = set(report.metadata.get("unscanned", []))
+    assert set(FOLDER_GAPS) <= unscanned, f"unscanned: {sorted(unscanned)}"
+
+
+def test_threat_coverage_summary_counts_match_the_corpus():
+    text = (Path(__file__).parent.parent / "docs" / "threat-coverage.md").read_text(
+        encoding="utf-8"
+    )
+    covered = len(EXPECTED) - len(KNOWN_GAPS)
+    assert f"| Malicious samples covered | {covered} of {len(EXPECTED)} |" in text
+    assert f"| Malicious samples with an open gap | {len(KNOWN_GAPS)} of {len(EXPECTED)} |" in text
 
 
 def test_compiled_python_in_skill_folder_is_flagged():

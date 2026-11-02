@@ -1051,13 +1051,18 @@ class TestCompiledPythonPayload:
     def test_cli_json_lists_unscanned_paths(self, tmp_path, monkeypatch, capsys):
         import json
 
-        from skillshield.models import BatchScanReport
-
-        report = BatchScanReport(results=[], metadata={"unscanned": ["blocked/payload.pyc"]})
-        monkeypatch.setattr(SkillScanner, "scan_directory", lambda self, target: report)
+        (tmp_path / "SKILL.md").write_text("# hello\n", encoding="utf-8")
+        (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
         assert _run_cli(monkeypatch, "scan", str(tmp_path), "--format", "json") == 0
         out = json.loads(capsys.readouterr().out)
-        assert out["unscanned"] == ["blocked/payload.pyc"]
+        assert [r["skill"] for r in out["results"]] == ["SKILL.md"]
+        assert out["unscanned"] == ["helper.zip"]
+
+    def test_a_directory_named_like_the_source_does_not_count_as_source(self, tmp_path):
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        (tmp_path / "tool.py").mkdir()
+        result = SkillScanner().scan_file(tmp_path / "tool.pyc")
+        assert "no matching tool.py" in result.findings[0].snippets[0]
 
     def test_a_compiled_file_that_cannot_be_read_is_an_error(self, tmp_path, monkeypatch):
         target = tmp_path / "skill.pyc"

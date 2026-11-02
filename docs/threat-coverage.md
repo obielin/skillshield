@@ -13,8 +13,8 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | | Count |
 |---|---|
-| Malicious samples covered | 8 of 31 |
-| Malicious samples with an open gap | 23 of 31 |
+| Malicious samples covered | 7 of 31 |
+| Malicious samples with an open gap | 24 of 31 |
 | Payload files in a skill folder covered | 1 of 6 |
 | Safe samples wrongly flagged | 1 of 4 |
 
