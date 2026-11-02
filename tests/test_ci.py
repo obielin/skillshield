@@ -160,6 +160,33 @@ def test_a_parent_relative_alias_is_not_scanned_twice(tmp_path):
     assert missing == []
 
 
+def test_a_symlinked_compiled_file_keeps_its_suffix(tmp_path):
+    target = tmp_path / "payload.bin"
+    target.write_bytes(b"bytecode")
+    link = tmp_path / "payload.pyc"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    results, missing, skipped = ci._scan_paths([str(link)], tmp_path)
+    assert missing == []
+    assert skipped == []
+    assert [r.findings[0].rule_id for r in results] == ["SG-014"]
+
+
+def test_a_symlink_loop_is_reported_as_a_missing_path(tmp_path):
+    loop = tmp_path / "loop"
+    try:
+        loop.symlink_to(loop)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    results, missing, skipped = ci._scan_paths([str(loop)], tmp_path)
+    assert results == []
+    assert missing == [str(loop)]
+    assert skipped == []
+    assert ci.run(_env(tmp_path, paths=str(loop))) == 2
+
+
 def test_job_summary_bounds_the_unscanned_list(tmp_path):
     (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
     extra = 5

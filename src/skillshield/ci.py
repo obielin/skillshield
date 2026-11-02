@@ -66,10 +66,11 @@ def _relative(path: Path, workspace: Path) -> str:
 
 
 def _normalised(path: Path) -> Path:
-    """One identity per file, so 'skills/../x' and 'x' count as the same file."""
+    """A stable identity for a path, without changing the path used to read it."""
     try:
         return path.resolve()
-    except OSError:
+    except (OSError, RuntimeError):
+        # A broken link or a symlink loop is reported as a missing path.
         return path
 
 
@@ -103,21 +104,26 @@ def _scan_paths(
         p = Path(raw)
         if not p.is_absolute():
             p = workspace / p
-        p = _normalised(p)
-        if p.is_dir():
-            all_files = sorted(f for f in p.rglob("*") if f.is_file())
-            files = [f for f in all_files if f not in scanned and _is_scanned(f, p)]
-            selected = set(files)
+        # Keep p for reading: its suffix decides how the file is scanned. Only
+        # key uses the resolved path, so aliases still count as one file.
+        key = _normalised(p)
+        if key.is_dir():
+            all_files = sorted(f for f in key.rglob("*") if f.is_file())
+            keys = {f: _normalised(f) for f in all_files}
+            files = [f for f in all_files if keys[f] not in scanned and _is_scanned(f, key)]
+            selected = {keys[f] for f in files}
             # A file an earlier input already scanned is not skipped: the
             # report must not call a file unscanned while its result is listed.
-            skipped.extend(f for f in all_files if f not in selected and f not in scanned)
-        elif p.is_file():
-            files = [] if p in scanned else [p]
+            skipped.extend(
+                f for f in all_files if keys[f] not in selected and keys[f] not in scanned
+            )
+        elif key.is_file():
+            files = [] if key in scanned else [p]
         else:
             missing.append(raw)
             continue
         for f in files:
-            scanned.add(f)
+            scanned.add(_normalised(f))
             result = scanner.scan_file(f)
             # scan_file names a result by file name only; use the path relative
             # to the workspace so findings point at the right file.
@@ -126,7 +132,9 @@ def _scan_paths(
     return (
         results,
         missing,
-        list(dict.fromkeys(_relative(f, workspace) for f in skipped if f not in scanned)),
+        list(
+            dict.fromkeys(_relative(f, workspace) for f in skipped if _normalised(f) not in scanned)
+        ),
     )
 
 
