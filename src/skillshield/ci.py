@@ -74,6 +74,21 @@ def _normalised(path: Path) -> Path:
         return path
 
 
+def _display_path(path: Path, workspace: Path) -> str:
+    """The submitted path relative to the workspace, without following symlinks."""
+    absolute = Path(os.path.abspath(path))
+    root = Path(os.path.abspath(workspace))
+    try:
+        return absolute.relative_to(root).as_posix()
+    except ValueError:
+        return absolute.as_posix()
+
+
+def _scan_identity(path: Path) -> tuple[Path, bool]:
+    """Identity for deduplication: resolved target plus how the file is scanned."""
+    return (_normalised(path), path.suffix.lower() in COMPILED_PYTHON_EXTENSIONS)
+
+
 def _is_scanned(path: Path, root: Path) -> bool:
     """Whether a file under root belongs in a CI scan.
 
@@ -99,7 +114,7 @@ def _scan_paths(
     results: list[SkillScanResult] = []
     missing: list[str] = []
     skipped: list[Path] = []
-    scanned: set[Path] = set()
+    scanned: set[tuple[Path, bool]] = set()
     for raw in paths:
         p = Path(raw)
         if not p.is_absolute():
@@ -107,9 +122,10 @@ def _scan_paths(
         # Keep p for reading: its suffix decides how the file is scanned. Only
         # key uses the resolved path, so aliases still count as one file.
         key = _normalised(p)
-        if key.is_dir():
+        directory = key.is_dir()
+        if directory:
             all_files = sorted(f for f in key.rglob("*") if f.is_file())
-            keys = {f: _normalised(f) for f in all_files}
+            keys = {f: _scan_identity(f) for f in all_files}
             files = [f for f in all_files if keys[f] not in scanned and _is_scanned(f, key)]
             selected = {keys[f] for f in files}
             # A file an earlier input already scanned is not skipped: the
@@ -118,22 +134,24 @@ def _scan_paths(
                 f for f in all_files if keys[f] not in selected and keys[f] not in scanned
             )
         elif key.is_file():
-            files = [] if key in scanned else [p]
+            files = [] if _scan_identity(p) in scanned else [p]
         else:
             missing.append(raw)
             continue
         for f in files:
-            scanned.add(_normalised(f))
+            scanned.add(_scan_identity(f))
             result = scanner.scan_file(f)
-            # scan_file names a result by file name only; use the path relative
-            # to the workspace so findings point at the right file.
-            result.skill_name = _relative(f, workspace)
+            # Name the file as it was submitted, not by the target of a symlink.
+            display = p / f.relative_to(key) if directory else f
+            result.skill_name = _display_path(display, workspace)
             results.append(result)
     return (
         results,
         missing,
         list(
-            dict.fromkeys(_relative(f, workspace) for f in skipped if _normalised(f) not in scanned)
+            dict.fromkeys(
+                _relative(f, workspace) for f in skipped if _scan_identity(f) not in scanned
+            )
         ),
     )
 

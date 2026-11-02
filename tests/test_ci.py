@@ -172,6 +172,22 @@ def test_a_symlinked_compiled_file_keeps_its_suffix(tmp_path):
     assert missing == []
     assert skipped == []
     assert [r.findings[0].rule_id for r in results] == ["SG-014"]
+    assert results[0].skill_name == "payload.pyc"
+
+
+def test_a_compiled_symlink_is_scanned_after_its_text_target(tmp_path):
+    source = tmp_path / "source.py"
+    source.write_text("print('hello')\n", encoding="utf-8")
+    link = tmp_path / "payload.pyc"
+    try:
+        link.symlink_to(source)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    results, missing, skipped = ci._scan_paths([str(source), str(link)], tmp_path)
+    assert missing == []
+    assert skipped == []
+    assert [r.skill_name for r in results] == ["source.py", "payload.pyc"]
+    assert [f.rule_id for r in results for f in r.findings] == ["SG-014"]
 
 
 def test_a_symlink_loop_is_reported_as_a_missing_path(tmp_path):
