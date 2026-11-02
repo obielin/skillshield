@@ -27,7 +27,7 @@ import os
 import sys
 from pathlib import Path
 
-from skillshield.models import BatchScanReport, SkillScanResult
+from skillshield.models import BatchScanReport, SkillScanResult, missing_source_note
 from skillshield.rules import Severity
 from skillshield.sarif import report_to_sarif
 from skillshield.scanner import (
@@ -272,6 +272,9 @@ def console_report(
                 continue
             annotated += 1
             ids = ", ".join(f"{f.rule_id} {f.name}" for f in r.findings)
+            note = missing_source_note(r)
+            if note:
+                ids = f"{ids}; {note}"
             level = r.risk_level
             kind = "error" if exit_code == 1 and level in ("HIGH", "CRITICAL") else "warning"
             line = r.findings[0].line_numbers[0] if r.findings and r.findings[0].line_numbers else 1

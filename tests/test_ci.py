@@ -278,6 +278,14 @@ def test_summary_bounds_a_long_list_of_unreadable_files():
     assert "- ... and 5 more, not listed here" in summary
 
 
+def test_console_annotation_includes_the_missing_source_note(tmp_path):
+    payload = tmp_path / "tool.pyc"
+    payload.write_bytes(b"bytecode")
+    results, _ = ci.scan_paths([str(payload)], tmp_path)
+    out = ci.console_report(results, [], 1)
+    assert "no matching tool.py" in out
+
+
 def test_console_bounds_a_long_list_of_unreadable_files():
     results = [
         SkillScanResult(
