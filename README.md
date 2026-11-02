@@ -79,7 +79,9 @@ Options for `skillshield scan`:
 `skillshield check` uses all rules and always shows matched snippets.
 
 A directory scan reads every file with one of these extensions, in all subdirectories:
-`.md`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.pyc`, `.pyo`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
+`.md`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
+
+`.pyc` and `.pyo` files are always collected as well, wherever they sit, including `.git`, `.venv`, `node_modules` and `__pycache__`. They are not part of the extension list above, so passing `extensions` cannot switch the compiled-Python check off. Every other file the scan does not open is listed in `unscanned`.
 
 #### Example: a skill that triggers SG-011
 
@@ -351,7 +353,7 @@ skillshield scan SKILL.md --format json
 }
 ```
 
-For a directory, the output has `total`, `flagged`, `critical`, `flag_rate` and `results`. Each entry in `results` has `skill`, `risk_level`, `risk_score` and `findings`. Findings in a directory scan have `id`, `name`, `severity`, `description` and up to 3 `snippets`. They do not have `remediation` or `line_numbers`.
+For a directory, the output has `total`, `flagged`, `critical`, `errors`, `flag_rate`, `unscanned` and `results`. `unscanned` lists the files the scan did not open, relative to the scanned directory; it is empty when every file was read. Each entry in `results` has `skill`, `risk_level`, `risk_score` and `findings`. Findings in a directory scan have `id`, `name`, `severity`, `description` and up to 3 `snippets`. They do not have `remediation` or `line_numbers`.
 
 ```bash
 skillshield scan ./skills/ --format json
@@ -362,7 +364,11 @@ skillshield scan ./skills/ --format json
   "total": 2,
   "flagged": 1,
   "critical": 1,
+  "errors": 0,
   "flag_rate": 0.5,
+  "unscanned": [
+    "helper.zip"
+  ],
   "results": [
     {
       "skill": "SKILL.md",
@@ -410,6 +416,7 @@ skillshield scan ./skills/ --format sarif > skillshield.sarif
 - CRITICAL and HIGH findings have the level `error`. MEDIUM is `warning`, LOW is `note` and INFO is `none`.
 - Each result has one location per matched line, up to 5. A finding with no line numbers, such as SG-011, points at line 1.
 - The rule list in the log always holds all 15 rules.
+- Files the scan did not open are listed in `runs[0].properties.unscanned`. GitHub code scanning reads `runs[].results[]` only, so that field does not appear on the Security tab; read the SARIF file or the CLI JSON to see it.
 
 ---
 

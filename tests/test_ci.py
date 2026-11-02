@@ -139,6 +139,58 @@ def test_job_summary_bounds_the_unscanned_list(tmp_path):
     assert f"... and {extra} more, not listed here" in summary
 
 
+def test_the_bounded_unscanned_list_shows_payloads_before_tooling_dirs(tmp_path):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
+    git = tmp_path / ".git"
+    git.mkdir()
+    for i in range(ci.MAX_UNSCANNED_LISTED + 5):
+        (git / f"object{i}").write_text("x", encoding="utf-8")
+    ci.run(_env(tmp_path, paths="."))
+    summary = (tmp_path / "summary.md").read_text()
+    listed = [line for line in summary.splitlines() if line.startswith("- `")]
+    assert listed[0] == "- `helper.zip`"
+    assert f"| Unscanned files | {ci.MAX_UNSCANNED_LISTED + 6} |" in summary
+    assert f"... and {ci.MAX_UNSCANNED_LISTED + 6 - ci.MAX_UNSCANNED_LISTED} more" in summary
+
+
+def test_job_summary_bounds_the_flagged_table(tmp_path):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    extra = 5
+    for i in range(ci.MAX_FLAGGED_LISTED + extra):
+        (tmp_path / f"payload{i}.pyc").write_bytes(b"bytecode")
+    ci.run(_env(tmp_path, paths="."))
+    summary = (tmp_path / "summary.md").read_text()
+    assert summary.count("| SG-014 |") == ci.MAX_FLAGGED_LISTED
+    assert f"| ... and {extra} more, not listed here | | | |" in summary
+    assert f"| Flagged files | {ci.MAX_FLAGGED_LISTED + extra} |" in summary
+
+
+def test_console_bounds_the_annotations(tmp_path, capsys):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    extra = 3
+    for i in range(ci.MAX_FLAGGED_LISTED + extra):
+        (tmp_path / f"payload{i}.pyc").write_bytes(b"bytecode")
+    ci.run(_env(tmp_path, paths="."))
+    out = capsys.readouterr().out
+    assert out.count("::error file=") == ci.MAX_FLAGGED_LISTED
+    assert f"::warning::SkillShield flagged {ci.MAX_FLAGGED_LISTED + extra} file(s)" in out
+
+
+def test_console_annotates_the_worst_files_first(tmp_path, capsys):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    for i in range(ci.MAX_FLAGGED_LISTED):
+        (tmp_path / f"a{i:03d}.pyc").write_bytes(b"bytecode")
+    risky = tmp_path / "z_risky"
+    risky.mkdir()
+    (risky / "SKILL.md").write_text(RISKY, encoding="utf-8")
+    ci.run(_env(tmp_path, paths="."))
+    out = capsys.readouterr().out
+    # The CRITICAL file sorts last by name; it must still be annotated.
+    assert "file=z_risky/SKILL.md" in out
+    assert out.count("::error file=") == ci.MAX_FLAGGED_LISTED
+
+
 def test_console_does_not_promise_a_sarif_report_that_is_not_written(tmp_path, capsys):
     (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
     (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")

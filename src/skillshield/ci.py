@@ -33,6 +33,7 @@ from skillshield.sarif import report_to_sarif
 from skillshield.scanner import (
     COMPILED_PYTHON_EXTENSIONS,
     SKILL_EXTENSIONS,
+    SKIP_DIRS,
     SkillScanner,
     _dir_is_skipped,
 )
@@ -46,6 +47,12 @@ SEVERITIES = {s.value.lower(): s for s in Severity}
 # repository can skip thousands of files, so the summary shows a bounded sample
 # and keeps the total count.
 MAX_UNSCANNED_LISTED = 20
+MAX_FLAGGED_LISTED = 50
+
+# Paths under a tooling or dependency directory are listed last: on a real
+# repository .git alone can fill every slot of the bounded list and hide the
+# payload a reader needs to see.
+_TOOLING_PREFIXES = tuple(f"{name}/" for name in sorted(SKIP_DIRS))
 
 
 class SettingError(ValueError):
@@ -137,6 +144,17 @@ def highest_level(results: list[SkillScanResult]) -> str:
     return max((r.risk_level for r in read), key=_rank)
 
 
+def _visible_unscanned(unscanned: list[str]) -> list[str]:
+    """The skipped paths worth showing first, bounded for the job summary.
+
+    Tooling and dependency directories come last, so a payload outside them
+    still reaches the list on a repository whose .git alone could fill it.
+    """
+    visible = [name for name in unscanned if not name.startswith(_TOOLING_PREFIXES)]
+    hidden = [name for name in unscanned if name.startswith(_TOOLING_PREFIXES)]
+    return (visible + hidden)[:MAX_UNSCANNED_LISTED]
+
+
 def summary_markdown(
     results: list[SkillScanResult],
     missing: list[str],
@@ -166,19 +184,24 @@ def summary_markdown(
     ]
     if flagged:
         lines += ["| File | Risk | Score | Findings |", "|---|---|---|---|"]
-        for r in sorted(flagged, key=lambda r: (-_rank(r.risk_level), r.skill_name)):
+        ordered = sorted(flagged, key=lambda r: (-_rank(r.risk_level), r.skill_name))
+        for r in ordered[:MAX_FLAGGED_LISTED]:
             ids = ", ".join(f.rule_id for f in r.findings)
             lines.append(f"| `{r.skill_name}` | {r.risk_level} | {r.risk_score:.0f} | {ids} |")
+        omitted_flagged = len(ordered) - MAX_FLAGGED_LISTED
+        if omitted_flagged > 0:
+            lines.append(f"| ... and {omitted_flagged} more, not listed here | | | |")
         lines.append("")
     for r in errors:
         lines.append(f"- Could not read `{r.skill_name}`: {r.error}")
     for m in missing:
         lines.append(f"- Path does not exist: `{m}`")
     if unscanned:
+        shown = _visible_unscanned(unscanned)
         lines += ["Files not scanned:", ""]
-        for name in unscanned[:MAX_UNSCANNED_LISTED]:
+        for name in shown:
             lines.append(f"- `{name}`")
-        omitted = len(unscanned) - MAX_UNSCANNED_LISTED
+        omitted = len(unscanned) - len(shown)
         if omitted > 0:
             lines.append(f"- ... and {omitted} more, not listed here")
         lines.append("")
@@ -194,12 +217,21 @@ def console_report(
 ) -> str:
     """Plain text lines for the job log, with GitHub annotations for flagged files."""
     lines = []
-    for r in results:
+    annotated = 0
+    # Annotate the worst files first, in the order the summary lists them, so a
+    # bounded log never spends its slots on the mildest findings.
+    ordered = sorted(
+        results, key=lambda r: (r.risk_level != "ERROR", -_rank(r.risk_level), r.skill_name)
+    )
+    for r in ordered:
         if r.risk_level == "ERROR":
             lines.append(
                 f"::error file={r.skill_name}::SkillShield could not read this file: {r.error}"
             )
         elif r.risk_level != "SAFE":
+            if annotated >= MAX_FLAGGED_LISTED:
+                continue
+            annotated += 1
             ids = ", ".join(f"{f.rule_id} {f.name}" for f in r.findings)
             level = r.risk_level
             kind = "error" if exit_code == 1 and level in ("HIGH", "CRITICAL") else "warning"
@@ -207,6 +239,12 @@ def console_report(
             lines.append(
                 f"::{kind} file={r.skill_name},line={line},title=SkillShield {level}::{ids}"
             )
+    flagged_total = sum(1 for r in results if r.risk_level not in ("SAFE", "ERROR"))
+    if flagged_total > annotated:
+        lines.append(
+            f"::warning::SkillShield flagged {flagged_total} file(s); the first {annotated} "
+            "are annotated here and the job summary lists the rest."
+        )
     for m in missing:
         lines.append(f"::error::SkillShield: path does not exist: {m}")
     if unscanned:
