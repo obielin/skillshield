@@ -100,6 +100,32 @@ def test_sarif_uses_paths_relative_to_the_workspace(tmp_path):
     assert uris == {"skills/a/SKILL.md"}
 
 
+def test_sarif_lists_every_file_the_scan_skipped(tmp_path):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "setup.ps1").write_text("Write-Host hello\n", encoding="utf-8")
+    (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "notes.md").write_text(RISKY, encoding="utf-8")
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+    (tmp_path / ".venv" / "notes.md").write_text(RISKY, encoding="utf-8")
+    sarif = tmp_path / "out.sarif"
+    ci.run(_env(tmp_path, paths=".", sarif_file=str(sarif)))
+    props = json.loads(sarif.read_text())["runs"][0]["properties"]
+    assert sorted(props["unscanned"]) == [
+        ".git/notes.md",
+        ".venv/notes.md",
+        ".venv/pyvenv.cfg",
+        "helper.zip",
+        "scripts/setup.ps1",
+    ]
+    summary = (tmp_path / "summary.md").read_text()
+    assert "| Unscanned files | 5 |" in summary
+    assert "`scripts/setup.ps1`" in summary
+
+
 def test_several_paths_one_per_line(tmp_path):
     (tmp_path / "one.md").write_text("hello")
     (tmp_path / "two.md").write_text(RISKY)
@@ -117,6 +143,19 @@ def test_tooling_directories_are_skipped(tmp_path):
     (tmp_path / ".claude" / "skills" / "SKILL.md").write_text("hello")
     results, _ = ci.scan_paths(["."], tmp_path)
     assert [r.skill_name for r in results] == [".claude/skills/SKILL.md"]
+
+
+def test_bytecode_in_tooling_directories_is_reported(tmp_path):
+    names = []
+    for d in (".git", "node_modules", ".venv", ".tox", ".mypy_cache"):
+        target = tmp_path / d / "payload.pyc"
+        target.parent.mkdir()
+        target.write_bytes(b"bytecode")
+        names.append(f"{d}/payload.pyc")
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+    results, _ = ci.scan_paths(["."], tmp_path)
+    assert sorted(r.skill_name for r in results) == sorted(names)
+    assert all(r.findings[0].rule_id == "SG-014" for r in results)
 
 
 def test_min_severity_drops_lower_findings(tmp_path):

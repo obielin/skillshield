@@ -76,7 +76,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 ## Payload outside SKILL.md
 
-`tests/fixtures/redteam/skill-folder/` is one skill with a harmless `SKILL.md` and the payload in other files. A directory scan now flags the compiled `.pyc` (SG-014); the remaining files are still skipped without being reported, because they have no scanned extension (#39).
+`tests/fixtures/redteam/skill-folder/` is one skill with a harmless `SKILL.md` and the payload in other files. A directory scan now flags the compiled `.pyc` (SG-014); the remaining files are listed as unscanned, because they have no scanned extension (#39).
 
 | File | Technique | Source | Status |
 |---|---|---|---|

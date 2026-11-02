@@ -27,9 +27,9 @@ import os
 import sys
 from pathlib import Path
 
-from skillshield.models import SkillScanResult
+from skillshield.models import BatchScanReport, SkillScanResult
 from skillshield.rules import Severity
-from skillshield.sarif import results_to_sarif
+from skillshield.sarif import report_to_sarif
 from skillshield.scanner import (
     COMPILED_PYTHON_EXTENSIONS,
     SKILL_EXTENSIONS,
@@ -60,34 +60,37 @@ def _relative(path: Path, workspace: Path) -> str:
 def _is_scanned(path: Path, root: Path) -> bool:
     """Whether a file under root belongs in a CI scan.
 
-    Compiled Python is collected wherever it sits: a .pyc is the thing a
-    reader skips, and its usual home, __pycache__, is in SKIP_DIRS.
+    Compiled Python is collected wherever it sits: bytecode is what a reader
+    skips, and a directory name or a submitted pyvenv.cfg must not hide it.
     """
     suffix = path.suffix.lower()
-    compiled = suffix in COMPILED_PYTHON_EXTENSIONS
+    if suffix in COMPILED_PYTHON_EXTENSIONS:
+        return True
     current = root
     for part in path.relative_to(root).parts[:-1]:
         current = current / part
-        if _dir_is_skipped(current, allow_pycache=compiled):
+        if _dir_is_skipped(current):
             return False
-    # __pycache__ is where a shipped .pyc lives, so it is no reason to skip a
-    # compiled file; a verified local environment or node_modules still is.
-    return compiled or suffix in SKILL_EXTENSIONS
+    return suffix in SKILL_EXTENSIONS
 
 
-def scan_paths(
+def _scan_paths(
     paths: list[str], workspace: Path, min_severity: Severity = Severity.INFO
-) -> tuple[list[SkillScanResult], list[str]]:
-    """Scan each path. Returns the results and the paths that do not exist."""
+) -> tuple[list[SkillScanResult], list[str], list[str]]:
+    """Scan each path and also collect the files the directory policy skipped."""
     scanner = SkillScanner(min_severity=min_severity)
     results: list[SkillScanResult] = []
     missing: list[str] = []
+    skipped: list[str] = []
     for raw in paths:
         p = Path(raw)
         if not p.is_absolute():
             p = workspace / p
         if p.is_dir():
-            files = sorted(f for f in p.rglob("*") if f.is_file() and _is_scanned(f, p))
+            all_files = sorted(f for f in p.rglob("*") if f.is_file())
+            files = [f for f in all_files if _is_scanned(f, p)]
+            selected = set(files)
+            skipped.extend(_relative(f, workspace) for f in all_files if f not in selected)
         elif p.is_file():
             files = [p]
         else:
@@ -99,6 +102,14 @@ def scan_paths(
             # to the workspace so findings point at the right file.
             result.skill_name = _relative(f, workspace)
             results.append(result)
+    return results, missing, list(dict.fromkeys(skipped))
+
+
+def scan_paths(
+    paths: list[str], workspace: Path, min_severity: Severity = Severity.INFO
+) -> tuple[list[SkillScanResult], list[str]]:
+    """Scan each path. Returns the results and the paths that do not exist."""
+    results, missing, _ = _scan_paths(paths, workspace, min_severity)
     return results, missing
 
 
@@ -121,13 +132,18 @@ def highest_level(results: list[SkillScanResult]) -> str:
 
 
 def summary_markdown(
-    results: list[SkillScanResult], missing: list[str], fail_on: str | None, exit_code: int
+    results: list[SkillScanResult],
+    missing: list[str],
+    fail_on: str | None,
+    exit_code: int,
+    unscanned: list[str] | None = None,
 ) -> str:
     """A Markdown summary of the scan, for the GitHub job summary."""
     verdict = {0: "Passed", 1: "Failed", 2: "Error"}[exit_code]
     threshold = fail_on or "never"
     flagged = [r for r in results if r.risk_level not in ("SAFE", "ERROR")]
     errors = [r for r in results if r.risk_level == "ERROR"]
+    unscanned = unscanned or []
     lines = [
         f"## SkillShield scan: {verdict}",
         "",
@@ -139,6 +155,7 @@ def summary_markdown(
         f"| Flagged files | {len(flagged)} |",
         f"| Unreadable files | {len(errors)} |",
         f"| Missing paths | {len(missing)} |",
+        f"| Unscanned files | {len(unscanned)} |",
         "",
     ]
     if flagged:
@@ -151,10 +168,20 @@ def summary_markdown(
         lines.append(f"- Could not read `{r.skill_name}`: {r.error}")
     for m in missing:
         lines.append(f"- Path does not exist: `{m}`")
+    if unscanned:
+        lines += ["Files not scanned:", ""]
+        for name in unscanned:
+            lines.append(f"- `{name}`")
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
-def console_report(results: list[SkillScanResult], missing: list[str], exit_code: int) -> str:
+def console_report(
+    results: list[SkillScanResult],
+    missing: list[str],
+    exit_code: int,
+    unscanned: list[str] | None = None,
+) -> str:
     """Plain text lines for the job log, with GitHub annotations for flagged files."""
     lines = []
     for r in results:
@@ -172,6 +199,11 @@ def console_report(results: list[SkillScanResult], missing: list[str], exit_code
             )
     for m in missing:
         lines.append(f"::error::SkillShield: path does not exist: {m}")
+    if unscanned:
+        lines.append(
+            f"::warning::SkillShield skipped {len(unscanned)} file(s) it could not scan; "
+            "they are listed in the job summary and SARIF report."
+        )
     lines.append(
         f"SkillShield scanned {len(results)} file(s); highest risk level {highest_level(results)}."
     )
@@ -211,16 +243,17 @@ def run(env: dict[str, str]) -> int:
         print(f"::error::SkillShield: {e}")
         return 2
 
-    results, missing = scan_paths(s["paths"], s["workspace"], s["min_severity"])
+    results, missing, skipped = _scan_paths(s["paths"], s["workspace"], s["min_severity"])
     exit_code = decide(results, missing, s["fail_on"])
 
     if s["sarif_file"]:
-        _write(s["sarif_file"], json.dumps(results_to_sarif(results), indent=2))
+        report = BatchScanReport(results=results, metadata={"unscanned": skipped})
+        _write(s["sarif_file"], json.dumps(report_to_sarif(report), indent=2))
 
-    print(console_report(results, missing, exit_code))
+    print(console_report(results, missing, exit_code, skipped))
     _write(
         env.get("GITHUB_STEP_SUMMARY"),
-        summary_markdown(results, missing, s["fail_on"], exit_code),
+        summary_markdown(results, missing, s["fail_on"], exit_code, skipped),
         "a",
     )
 

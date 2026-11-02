@@ -79,7 +79,7 @@ Options for `skillshield scan`:
 `skillshield check` uses all rules and always shows matched snippets.
 
 A directory scan reads every file with one of these extensions, in all subdirectories:
-`.md`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
+`.md`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.pyc`, `.pyo`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
 
 #### Example: a skill that triggers SG-011
 
@@ -438,7 +438,7 @@ The step fails when any file is HIGH or CRITICAL. A file counts as HIGH if its r
 
 | Input | Default | What it does |
 |---|---|---|
-| `path` | `.` | Files or directories to scan, one per line. Directories are scanned recursively, skipping `.git`, `node_modules` and virtual environments. |
+| `path` | `.` | Files or directories to scan, one per line. Directories are scanned recursively; `.git` and `node_modules` are skipped, and a virtual environment with `pyvenv.cfg` is skipped for text files. Compiled Python is scanned wherever it sits. |
 | `fail-on` | `high` | Fail at this level or above: `critical`, `high`, `medium`, `low` or `none`. |
 | `min-severity` | `info` | Ignore findings below this severity. |
 | `sarif-file` | a temporary file | Where to write the SARIF report. |

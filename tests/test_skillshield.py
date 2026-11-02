@@ -12,7 +12,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from skillshield import ALL_RULES, Severity, SkillScanner
-from skillshield.ci import effective_level
 from skillshield.rules import (
     RULE_DATA_EXFIL,
     RULE_IDENTITY_HIJACK,
@@ -885,7 +884,7 @@ class TestCompiledPythonPayload:
         result = SkillScanner().scan_file(target)
         assert [f.rule_id for f in result.findings] == ["SG-014"]
         assert result.findings[0].severity == Severity.HIGH
-        assert effective_level(result) == "HIGH"
+        assert result.risk_level == "HIGH"
 
     def test_cache_tagged_pyc_finds_its_source(self, tmp_path):
         import importlib.util
@@ -931,18 +930,36 @@ class TestCompiledPythonPayload:
         flagged = [r for r in results if any(f.rule_id == "SG-014" for f in r.findings)]
         assert [r.skill_name for r in flagged] == ["__pycache__/tool.cpython-310.pyc"]
 
-    def test_directory_scan_skips_venv_bytecode(self, tmp_path):
+    def test_directory_scan_reports_venv_bytecode_with_pyvenv_cfg(self, tmp_path):
         site = tmp_path / ".venv" / "lib" / "python3.12" / "site-packages" / "pkg" / "__pycache__"
         site.mkdir(parents=True)
         (site / "x.cpython-312.pyc").write_bytes(b"bytecode")
         (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
         (tmp_path / "tool.pyc").write_bytes(b"bytecode")
         report = SkillScanner().scan_directory(tmp_path)
-        assert [r.skill_name for r in report.results] == ["tool.pyc"]
-        assert report.metadata["unscanned"] == [
-            ".venv/lib/python3.12/site-packages/pkg/__pycache__/x.cpython-312.pyc"
+        assert sorted(r.skill_name for r in report.results) == [
+            ".venv/lib/python3.12/site-packages/pkg/__pycache__/x.cpython-312.pyc",
+            "tool.pyc",
         ]
+        assert all(r.findings[0].rule_id == "SG-014" for r in report.results)
+        assert report.metadata == {"unscanned": [".venv/pyvenv.cfg"]}
         assert "UNSCANNED (1)" in report.summary()
+
+    def test_directory_scan_lists_files_it_did_not_scan(self, tmp_path):
+        (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        (scripts / "install").write_text("#!/bin/sh\n", encoding="utf-8")
+        (scripts / "setup.ps1").write_text("Write-Host hello\n", encoding="utf-8")
+        (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
+        report = SkillScanner().scan_directory(tmp_path)
+        assert [r.skill_name for r in report.results] == ["SKILL.md"]
+        assert report.metadata["unscanned"] == [
+            "helper.zip",
+            "scripts/install",
+            "scripts/setup.ps1",
+        ]
+        assert "UNSCANNED (3)" in report.summary()
 
     def test_a_shipped_dot_venv_without_pyvenv_cfg_is_scanned(self, tmp_path):
         # The name alone does not make a local environment: this .venv ships
@@ -987,7 +1004,17 @@ class TestCompiledPythonPayload:
         assert [f.rule_id for f in result.findings] == ["SG-014"]
         assert "(no matching " in result.findings[0].snippets[0]
 
-    def test_dependency_directories_stay_out_of_a_ci_scan(self, tmp_path):
+    def test_cache_tagged_pyo_finds_its_source(self, tmp_path):
+        from skillshield.models import missing_source_note
+
+        cache = tmp_path / "__pycache__"
+        cache.mkdir()
+        (cache / "tool.cpython-310.pyo").write_bytes(b"bytecode")
+        (tmp_path / "tool.py").write_text("print('hello')\n", encoding="utf-8")
+        result = SkillScanner().scan_file(cache / "tool.cpython-310.pyo")
+        assert missing_source_note(result) == ""
+
+    def test_dependency_directory_bytecode_is_reported_by_ci(self, tmp_path):
         from skillshield.ci import scan_paths
 
         vendored = tmp_path / ".venv" / "lib" / "site-packages" / "pkg" / "__pycache__"
@@ -1005,7 +1032,8 @@ class TestCompiledPythonPayload:
         names = [r.skill_name for r in results]
         assert "scripts/__pycache__/helper.cpython-310.pyc" in names
         assert "skills/.venv/bin/hidden.pyc" in names
-        assert not [name for name in names if name.startswith(".venv/")]
+        assert ".venv/lib/site-packages/pkg/__pycache__/tool.cpython-310.pyc" in names
+        assert all(r.findings[0].rule_id == "SG-014" for r in results)
 
     def test_a_compiled_file_with_its_source_gets_no_note(self, tmp_path):
         from skillshield.ci import scan_paths
@@ -1019,6 +1047,17 @@ class TestCompiledPythonPayload:
         result = next(r for r in results if r.skill_name.endswith("tool.pyc"))
         assert result.findings
         assert missing_source_note(result) == ""
+
+    def test_cli_json_lists_unscanned_paths(self, tmp_path, monkeypatch, capsys):
+        import json
+
+        from skillshield.models import BatchScanReport
+
+        report = BatchScanReport(results=[], metadata={"unscanned": ["blocked/payload.pyc"]})
+        monkeypatch.setattr(SkillScanner, "scan_directory", lambda self, target: report)
+        assert _run_cli(monkeypatch, "scan", str(tmp_path), "--format", "json") == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["unscanned"] == ["blocked/payload.pyc"]
 
     def test_a_compiled_file_that_cannot_be_read_is_an_error(self, tmp_path, monkeypatch):
         target = tmp_path / "skill.pyc"

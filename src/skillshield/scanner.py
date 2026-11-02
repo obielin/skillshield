@@ -55,7 +55,7 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", ".m
 _LOCAL_ENV_NAMES = {"venv", ".venv"}
 
 
-def _dir_is_skipped(directory: Path, *, allow_pycache: bool = False) -> bool:
+def _dir_is_skipped(directory: Path) -> bool:
     """Whether a directory is tooling rather than skill content.
 
     A venv name alone proves nothing: a skill can ship its own .venv/ to hide
@@ -65,25 +65,8 @@ def _dir_is_skipped(directory: Path, *, allow_pycache: bool = False) -> bool:
     name = directory.name
     if name not in SKIP_DIRS:
         return False
-    if name == "__pycache__":
-        return not allow_pycache
     if name in _LOCAL_ENV_NAMES and not (directory / "pyvenv.cfg").is_file():
         return False
-    return True
-
-
-def _compiled_collectable(path: Path, base: Path) -> bool:
-    """Whether a compiled path belongs in a directory scan.
-
-    __pycache__ is where a shipped .pyc lives, so it is no reason to skip; a
-    verified local environment or node_modules still is. Mirrors the CI gate,
-    so the directory scan and scan_paths agree on the same project root.
-    """
-    current = base
-    for part in path.relative_to(base).parts[:-1]:
-        current = current / part
-        if _dir_is_skipped(current, allow_pycache=True):
-            return False
     return True
 
 
@@ -97,7 +80,12 @@ def compiled_source_path(path: Path) -> Path:
     try:
         return Path(importlib.util.source_from_cache(str(path)))
     except (ValueError, NotImplementedError):
-        # .pyo, or a name source_from_cache will not take.
+        # .pyo in __pycache__, or a name source_from_cache will not take.
+        # Keep the interpreter tag out of the guessed source name:
+        # tool.cpython-310.pyo -> tool.py, not tool.cpython-310.py.
+        if path.parent.name == "__pycache__" and "." in path.stem:
+            module = path.stem.split(".", 1)[0]
+            return path.parent.parent / f"{module}.py"
         return path.with_suffix(".py")
 
 
@@ -308,18 +296,22 @@ class SkillScanner:
         paths = [p for p in all_files if p.suffix.lower() in exts]
         # A compiled file asked for through extensions already reaches
         # scan_file, which dispatches to the compiled check; collecting it
-        # here as well would report the same file twice.
-        compiled: list[Path] = []
-        unscanned: list[str] = []
-        for p in all_files:
-            if p.suffix.lower() not in COMPILED_PYTHON_EXTENSIONS or p.suffix.lower() in exts:
-                continue
-            if _compiled_collectable(p, base):
-                compiled.append(p)
-            else:
-                unscanned.append(p.relative_to(base).as_posix())
+        # here as well would report the same file twice. Compiled Python is
+        # never filtered by directory name: a submitted skill can hide
+        # bytecode inside any directory, including a real local environment.
+        compiled = [
+            p
+            for p in all_files
+            if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS and p.suffix.lower() not in exts
+        ]
 
-        self._log(f"  Found {len(paths)} skill files in {directory}")
+        selected = set(paths) | set(compiled)
+        unscanned = [
+            path.relative_to(base).as_posix() for path in all_files if path not in selected
+        ]
+        self._log(
+            f"  Found {len(paths)} skill files and {len(compiled)} compiled files in {directory}"
+        )
         results: list[SkillScanResult] = []
         total = len(paths) + len(compiled)
 

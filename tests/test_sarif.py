@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import skillshield
 from skillshield import SkillScanner
-from skillshield.models import SkillScanResult
+from skillshield.models import BatchScanReport, SkillScanResult
 from skillshield.sarif import report_to_sarif, results_to_sarif, to_sarif_string
 
 # ── Fixture skill content ──────────────────────────────────────
@@ -241,6 +241,14 @@ class TestReportToSarif:
             for loc in result["locations"]
         }
         assert uris == {"a/SKILL.md", "b/SKILL.md"}
+
+    def test_report_to_sarif_lists_unscanned_paths(self):
+        report = BatchScanReport(results=[], metadata={"unscanned": ["blocked/payload.pyc"]})
+        run = report_to_sarif(report)["runs"][0]
+        assert run["properties"]["unscanned"] == ["blocked/payload.pyc"]
+
+        clean = report_to_sarif(BatchScanReport(results=[]))["runs"][0]
+        assert clean["properties"]["unscanned"] == []
 
 
 # ── to_sarif_string ────────────────────────────────────────────
