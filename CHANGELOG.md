@@ -23,6 +23,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- SG-004 now flags named human personas and instructions to deny being an AI when asked (#34).
 - A directory scan names each file by its path relative to the scanned directory (for example `a/SKILL.md`), with forward slashes, in text, JSON and SARIF output. Before, it used the file name only, so SARIF results for several `SKILL.md` files all pointed at `SKILL.md` (#24).
 
 ### Fixed

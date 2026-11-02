@@ -13,8 +13,8 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | | Count |
 |---|---|
-| Malicious samples covered | 7 of 31 |
-| Malicious samples with an open gap | 24 of 31 |
+| Malicious samples covered | 8 of 31 |
+| Malicious samples with an open gap | 23 of 31 |
 | Payload files in a skill folder covered | 0 of 6 |
 | Safe samples wrongly flagged | 1 of 4 |
 
@@ -67,7 +67,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | Sample | Technique | AST | Source | Status |
 |---|---|---|---|---|
-| 11 | Human persona that denies being an AI | AST01 | Transparency duty in EU AI Act Article 50 | Gap: #34 |
+| 11 | Human persona that denies being an AI | AST01 | Transparency duty in EU AI Act Article 50 | Covered (SG-004) |
 | 13 | Hidden side action ("don't tell the user") | AST01 | [Invariant Labs disclosure][invariant] | Gap: #36 |
 | 14 | Dormant instruction with a trigger word | AST01 | [Snyk, SKILL.md shell access][snyk-shell] | Gap: #37 |
 | 21 | Hide or downgrade security findings | AST01 | [Trail of Bits, line jumping][tob-lj] | Gap: #50 |
