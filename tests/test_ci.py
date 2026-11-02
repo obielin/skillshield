@@ -154,6 +154,19 @@ def test_the_bounded_unscanned_list_shows_payloads_before_tooling_dirs(tmp_path)
     assert f"... and {ci.MAX_UNSCANNED_LISTED + 6 - ci.MAX_UNSCANNED_LISTED} more" in summary
 
 
+def test_a_nested_tooling_directory_does_not_fill_the_unscanned_list(tmp_path):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    nested = tmp_path / "skills" / "demo" / ".git"
+    nested.mkdir(parents=True)
+    for i in range(ci.MAX_UNSCANNED_LISTED + 5):
+        (nested / f"object{i:02d}").write_text("x", encoding="utf-8")
+    (tmp_path / "skills" / "demo" / "helper.zip").write_bytes(b"PK\x03\x04")
+    ci.run(_env(tmp_path, paths="."))
+    summary = (tmp_path / "summary.md").read_text()
+    listed = [line for line in summary.splitlines() if line.startswith("- `")]
+    assert listed[0] == "- `skills/demo/helper.zip`"
+
+
 def test_job_summary_bounds_the_flagged_table(tmp_path):
     (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
     extra = 5
@@ -175,6 +188,8 @@ def test_console_bounds_the_annotations(tmp_path, capsys):
     out = capsys.readouterr().out
     assert out.count("::error file=") == ci.MAX_FLAGGED_LISTED
     assert f"::warning::SkillShield flagged {ci.MAX_FLAGGED_LISTED + extra} file(s)" in out
+    # The capped-out files are counted, not promised a place in the summary.
+    assert f"the other {extra} are counted only" in out
 
 
 def test_console_annotates_the_worst_files_first(tmp_path, capsys):

@@ -49,10 +49,11 @@ SEVERITIES = {s.value.lower(): s for s in Severity}
 MAX_UNSCANNED_LISTED = 20
 MAX_FLAGGED_LISTED = 50
 
-# Paths under a tooling or dependency directory are listed last: on a real
+# Paths inside a tooling or dependency directory are listed last: on a real
 # repository .git alone can fill every slot of the bounded list and hide the
-# payload a reader needs to see.
-_TOOLING_PREFIXES = tuple(f"{name}/" for name in sorted(SKIP_DIRS))
+# payload a reader needs to see. The check looks at every directory component,
+# so a nested `skills/demo/.git/object00` counts as tooling too.
+_TOOLING_DIRS = frozenset(SKIP_DIRS)
 
 
 class SettingError(ValueError):
@@ -144,14 +145,19 @@ def highest_level(results: list[SkillScanResult]) -> str:
     return max((r.risk_level for r in read), key=_rank)
 
 
+def _in_tooling_dir(name: str) -> bool:
+    """Whether a skipped path sits in a tooling or dependency directory."""
+    return any(part in _TOOLING_DIRS for part in name.split("/")[:-1])
+
+
 def _visible_unscanned(unscanned: list[str]) -> list[str]:
     """The skipped paths worth showing first, bounded for the job summary.
 
     Tooling and dependency directories come last, so a payload outside them
     still reaches the list on a repository whose .git alone could fill it.
     """
-    visible = [name for name in unscanned if not name.startswith(_TOOLING_PREFIXES)]
-    hidden = [name for name in unscanned if name.startswith(_TOOLING_PREFIXES)]
+    visible = [name for name in unscanned if not _in_tooling_dir(name)]
+    hidden = [name for name in unscanned if _in_tooling_dir(name)]
     return (visible + hidden)[:MAX_UNSCANNED_LISTED]
 
 
@@ -242,8 +248,9 @@ def console_report(
     flagged_total = sum(1 for r in results if r.risk_level not in ("SAFE", "ERROR"))
     if flagged_total > annotated:
         lines.append(
-            f"::warning::SkillShield flagged {flagged_total} file(s); the first {annotated} "
-            "are annotated here and the job summary lists the rest."
+            f"::warning::SkillShield flagged {flagged_total} file(s); the {annotated} worst "
+            f"are annotated here and in the job summary, the other "
+            f"{flagged_total - annotated} are counted only."
         )
     for m in missing:
         lines.append(f"::error::SkillShield: path does not exist: {m}")
