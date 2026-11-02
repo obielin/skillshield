@@ -127,6 +127,39 @@ def test_sarif_lists_every_file_the_scan_skipped(tmp_path):
     assert "`scripts/setup.ps1`" in summary
 
 
+def test_a_file_scanned_by_a_later_input_is_not_listed_as_skipped(tmp_path):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
+    results, missing, skipped = ci._scan_paths([".", "helper.zip"], tmp_path)
+    names = [r.skill_name for r in results]
+    assert names.count("helper.zip") == 1
+    assert skipped == []
+    assert missing == []
+
+
+def test_a_compiled_file_named_twice_is_scanned_once(tmp_path):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    cache = tmp_path / "__pycache__"
+    cache.mkdir()
+    (cache / "x.pyc").write_bytes(b"bytecode")
+    results, missing, skipped = ci._scan_paths([".", "__pycache__/x.pyc"], tmp_path)
+    names = [r.skill_name for r in results]
+    assert names.count("__pycache__/x.pyc") == 1
+    assert skipped == []
+    assert missing == []
+
+
+def test_a_parent_relative_alias_is_not_scanned_twice(tmp_path):
+    (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+    (tmp_path / "skills").mkdir()
+    (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
+    results, missing, skipped = ci._scan_paths([".", "skills/../helper.zip"], tmp_path)
+    names = [r.skill_name for r in results]
+    assert names.count("helper.zip") == 1
+    assert skipped == []
+    assert missing == []
+
+
 def test_job_summary_bounds_the_unscanned_list(tmp_path):
     (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
     extra = 5
