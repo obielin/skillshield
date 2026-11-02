@@ -140,13 +140,116 @@ RULE_PRIV_ESC = Rule(
 
 # ── SG-004: Identity Hijacking ─────────────────────────────────
 
-_IDENTITY_PATTERNS = [
-    r"you\s+(?:must|should|will)\s+(?:always\s+)?(?:claim|say|pretend|act)\s+(?:to\s+be|you\s+are)\s+(?!an?\s+(?:AI|assistant|language\s+model))",
-    r"(?:impersonate|pose\s+as|masquerade\s+as)\s+(?:a\s+)?(?:human|person|user|admin|support|employee)",
-    r"never\s+(?:reveal|admit|disclose|say)\s+(?:you\s+are\s+)?(?:an?\s+)?(?:AI|bot|assistant|language\s+model|artificial)",
-    r"(?:hide|conceal|mask)\s+(?:your\s+)?(?:AI|bot|assistant|artificial)\s+(?:nature|identity|origin)",
-    r"tell\s+(?:users?|humans?|people)\s+you\s+are\s+(?:a\s+)?(?:human|real\s+person)",
-]
+_AI_IDENTITY = r"(?:AI|artificial[ \t]+intelligence|bot|chatbot|assistant|language[ \t]+model)"
+_AI_IDENTITY_QUESTION = (
+    rf"(?:(?:if|whether)[ \t]+(?:"
+    rf"(?:you(?:['’]re|[ \t]+are)|(?:this|it)[ \t]+is)[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
+    rf"|they(?:['’]re|[ \t]+are)[ \t]+(?:talking|speaking)[ \t]+to[ \t]+"
+    rf"(?:an?[ \t]+)?{_AI_IDENTITY})"
+    rf"|about[ \t]+being[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
+    rf"|[\"'“]?(?:are[ \t]+you|is[ \t]+(?:this|it))[ \t]+(?:an?[ \t]+)?"
+    rf"{_AI_IDENTITY}[?\"'”]*)"
+)
+_AI_QUESTION_TRIGGER_RE = re.compile(
+    rf"\b(?:(?:if|when|whenever)\b[^;\r\n]{{0,80}}\b(?:asks?|asked)\b|"
+    rf"should[ \t]+(?:anyone|someone|a[ \t]+user|users?|they)[ \t]+ask\b)"
+    rf"[^;\r\n]{{0,80}}{_AI_IDENTITY_QUESTION}",
+    re.IGNORECASE,
+)
+_AI_DENIAL_RESPONSE_RE = re.compile(
+    rf"^[ \t]*[,.:\"'”)]*[ \t]*(?:then[ \t]+)?(?:please[ \t]+)?(?:"
+    rf"(?:(?:say|answer|reply|respond)(?:[ \t]+with)?|"
+    rf"tell[ \t]+(?:them|the[ \t]+user|users?|anyone))[ \t]*[,;:]?[ \t]*(?:"
+    rf"[\"'“]?no[\"'”]?"
+    rf"|(?:that[ \t]+)?you(?:[ \t]+aren['’]t|[ \t]+are[ \t]+not)"
+    rf"(?:[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY})?"
+    rf"|(?:that[ \t]+)?I(?:['’]m|[ \t]+am)[ \t]+not[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
+    rf"|(?:that[ \t]+)?(?:you(?:['’]re|[ \t]+are)|I(?:['’]m|[ \t]+am))"
+    rf"[ \t]+(?:a[ \t]+)?human)"
+    rf"|deny(?:[ \t]+it|[ \t]+being[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
+    rf"|[ \t]+that[ \t]+you[ \t]+are[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}))"
+    rf"(?=[ \t]*(?:[.!?,;]|$))",
+    re.IGNORECASE,
+)
+
+_NAMED_HUMAN_RE = re.compile(
+    r"\byou[ \t]+are[ \t]+"
+    r"(?-i:[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]*"
+    r"(?:[ \t]+[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]*){0,2}),[ \t]+"
+    r"(?:an?[ \t]+)?human\b(?P<tail>[^\r\n.;!?]{0,80})",
+    re.IGNORECASE,
+)
+_HUMAN_COMPOUND_WORDS = {
+    "behavior",
+    "biology",
+    "capital",
+    "computer",
+    "development",
+    "evolution",
+    "factors",
+    "feedback",
+    "geography",
+    "health",
+    "language",
+    "message",
+    "performance",
+    "relations",
+    "resources",
+    "response",
+    "rights",
+    "trafficking",
+}
+
+_IDENTITY_BASE_RE = re.compile(
+    "|".join(
+        [
+            r"you\s+(?:must|should|will)\s+(?:always\s+)?(?:claim|say|pretend|act)\s+(?:to\s+be|you\s+are)\s+(?!an?\s+(?:AI|assistant|language\s+model))",
+            r"(?:impersonate|pose\s+as|masquerade\s+as)\s+(?:a\s+)?(?:human|person|user|admin|support|employee)",
+            r"never\s+(?:reveal|admit|disclose|say)\s+(?:you\s+are\s+)?(?:an?\s+)?(?:AI|bot|assistant|language\s+model|artificial)",
+            r"(?:hide|conceal|mask)\s+(?:your\s+)?(?:AI|bot|assistant|artificial)\s+(?:nature|identity|origin)",
+            r"tell\s+(?:users?|humans?|people)\s+you\s+are\s+(?:a\s+)?(?:human|real\s+person)",
+        ]
+    ),
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _check_identity_hijack(text: str) -> list[str]:
+    """Return explainable identity-hijacking snippets with bounded clause matching."""
+    hits: list[tuple[int, int, str]] = [
+        (match.start(), match.end(), match.group(0)) for match in _IDENTITY_BASE_RE.finditer(text)
+    ]
+
+    for match in _NAMED_HUMAN_RE.finditer(text):
+        tail = match.group("tail").lstrip()
+        first_word = re.match(r"[-A-Za-z]+", tail)
+        if first_word:
+            word = first_word.group(0).lower().lstrip("-")
+            if tail.startswith("-") or word in _HUMAN_COMPOUND_WORDS:
+                continue
+        hits.append((match.start(), match.end(), match.group(0).rstrip()))
+
+    for segment in re.finditer(r"[^;\r\n]+", text):
+        segment_text = segment.group(0)
+        for question in _AI_QUESTION_TRIGGER_RE.finditer(segment_text):
+            response_text = segment_text[question.end() : question.end() + 200]
+            response = _AI_DENIAL_RESPONSE_RE.match(response_text)
+            if response is None:
+                continue
+            start = segment.start() + question.start()
+            end = segment.start() + question.end() + response.end()
+            hits.append((start, end, text[start:end]))
+
+    unique: list[tuple[int, int, str]] = []
+    seen: set[tuple[int, int]] = set()
+    for hit in sorted(hits, key=lambda item: (item[0], item[1])):
+        location = (hit[0], hit[1])
+        if location in seen:
+            continue
+        seen.add(location)
+        unique.append(hit)
+    return [snippet for _, _, snippet in unique]
+
 
 RULE_IDENTITY_HIJACK = Rule(
     id="SG-004",
@@ -161,7 +264,7 @@ RULE_IDENTITY_HIJACK = Rule(
         "AI agents must always be willing to identify themselves as AI when sincerely "
         "asked. Remove any identity-concealment instructions."
     ),
-    pattern=re.compile("|".join(_IDENTITY_PATTERNS), re.IGNORECASE | re.MULTILINE),
+    check_fn=_check_identity_hijack,
     tags=["identity", "transparency", "eu-ai-act-art50"],
 )
 
