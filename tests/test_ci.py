@@ -190,6 +190,22 @@ def test_a_compiled_symlink_is_scanned_after_its_text_target(tmp_path):
     assert [f.rule_id for r in results for f in r.findings] == ["SG-014"]
 
 
+def test_a_symlinked_directory_reports_submitted_paths(tmp_path):
+    real = tmp_path / "skills" / "v1"
+    real.mkdir(parents=True)
+    (real / "SKILL.md").write_text("hello", encoding="utf-8")
+    (real / "helper.zip").write_bytes(b"PK\x03\x04")
+    current = tmp_path / "skills" / "current"
+    try:
+        current.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    results, missing, skipped = ci._scan_paths([str(current)], tmp_path)
+    assert missing == []
+    assert [r.skill_name for r in results] == ["skills/current/SKILL.md"]
+    assert skipped == ["skills/current/helper.zip"]
+
+
 def test_a_symlink_loop_is_reported_as_a_missing_path(tmp_path):
     loop = tmp_path / "loop"
     try:

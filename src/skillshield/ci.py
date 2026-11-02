@@ -58,13 +58,6 @@ def _rank(level: str) -> int:
     return LEVELS.index(level) if level in LEVELS else -1
 
 
-def _relative(path: Path, workspace: Path) -> str:
-    try:
-        return path.resolve().relative_to(workspace.resolve()).as_posix()
-    except ValueError:
-        return path.as_posix()
-
-
 def _normalised(path: Path) -> Path:
     """A stable identity for a path, without changing the path used to read it."""
     try:
@@ -113,7 +106,7 @@ def _scan_paths(
     scanner = SkillScanner(min_severity=min_severity)
     results: list[SkillScanResult] = []
     missing: list[str] = []
-    skipped: list[Path] = []
+    skipped: list[tuple[Path, str]] = []
     scanned: set[tuple[Path, bool]] = set()
     for raw in paths:
         p = Path(raw)
@@ -126,12 +119,15 @@ def _scan_paths(
         if directory:
             all_files = sorted(f for f in key.rglob("*") if f.is_file())
             keys = {f: _scan_identity(f) for f in all_files}
+            displays = {f: _display_path(p / f.relative_to(key), workspace) for f in all_files}
             files = [f for f in all_files if keys[f] not in scanned and _is_scanned(f, key)]
             selected = {keys[f] for f in files}
             # A file an earlier input already scanned is not skipped: the
             # report must not call a file unscanned while its result is listed.
             skipped.extend(
-                f for f in all_files if keys[f] not in selected and keys[f] not in scanned
+                (f, displays[f])
+                for f in all_files
+                if keys[f] not in selected and keys[f] not in scanned
             )
         elif key.is_file():
             files = [] if _scan_identity(p) in scanned else [p]
@@ -148,11 +144,7 @@ def _scan_paths(
     return (
         results,
         missing,
-        list(
-            dict.fromkeys(
-                _relative(f, workspace) for f in skipped if _scan_identity(f) not in scanned
-            )
-        ),
+        list(dict.fromkeys(display for f, display in skipped if _scan_identity(f) not in scanned)),
     )
 
 
