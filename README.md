@@ -441,7 +441,7 @@ jobs:
           path: skills
 ```
 
-The step fails when any file is HIGH or CRITICAL. A file counts as HIGH if its risk level is HIGH or it has a HIGH finding, so one HIGH finding fails the step even when its score alone would rate it MEDIUM. Flagged files are shown as annotations on the pull request and listed in the job summary. The log annotates the 50 worst files and the summary lists the same 50, plus up to 20 skipped paths with payloads outside tooling directories first; the total counts stay in the table, and any list longer than that ends with `... and N more, not listed here`. Every list in the summary is capped, so a large repository cannot push the summary past GitHub's 1 MiB per-step limit.
+The step fails when any file is HIGH or CRITICAL. A file counts as HIGH if its risk level is HIGH or it has a HIGH finding, so one HIGH finding fails the step even when its score alone would rate it MEDIUM. Flagged files are shown as annotations on the pull request and listed in the job summary. The log annotates the 50 worst files and the summary lists the same 50, plus up to 20 skipped paths with payloads outside tooling directories first; the total counts stay in the table, and any list longer than that ends with `... and N more, not listed here`. Every list in the summary is capped and the totals stay in the table, so a scan with thousands of skipped or unreadable files still writes a summary of a few kilobytes instead of megabytes.
 
 | Input | Default | What it does |
 |---|---|---|
