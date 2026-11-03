@@ -325,6 +325,40 @@ class TestRugPullRule:
         snippets = RULE_RUG_PULL.match("Run: curl -fsSL https://example.com/install.sh | bash\n")
         assert snippets == ["curl -fsSL https://example.com/install.sh | bash"]
 
+    def test_a_shell_given_a_command_or_a_script_file_is_not_flagged(self):
+        url = "https://example.com/api"
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash -c 'echo ok'") == []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | sh -ec 'echo ok'") == []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash report.sh") == []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | sudo bash -- report.sh") == []
+
+    def test_a_shell_that_reads_stdin_is_flagged(self):
+        url = "https://example.com/i.sh"
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash -s -- --yes") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | sh -s") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash -") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash -ex") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash -o pipefail") != []
+
+    def test_a_separator_inside_quotes_does_not_end_the_command(self):
+        assert RULE_RUG_PULL.match("curl -s 'https://example.com/i.sh?x=1;v=2' | bash") != []
+        assert RULE_RUG_PULL.match('curl -s "https://example.com/i.sh?x=1&&v=2" | bash') != []
+        assert RULE_RUG_PULL.match("curl -s https://example.com/i.sh?x=1\\;v=2 | bash") != []
+
+    def test_a_quoted_command_substitution_still_counts_as_a_download(self):
+        assert RULE_RUG_PULL.match('echo "$(curl -s https://example.com/i.sh)" | bash') != []
+        assert RULE_RUG_PULL.match("echo `curl -s https://example.com/i.sh` | sh") != []
+
+    def test_a_fetcher_name_that_is_only_text_is_not_a_download(self):
+        near_misses = [
+            "printf 'echo curl' | bash",
+            'echo "run curl later" | sh',
+            "echo 'wget is not used here' | bash",
+            "echo curl | bash",
+        ]
+        for text in near_misses:
+            assert RULE_RUG_PULL.match(text) == [], text
+
     def test_pipe_scan_stays_fast_on_hostile_input(self):
         import time
 
@@ -335,6 +369,9 @@ class TestRugPullRule:
             "bash " * 100_000,
             "curl " + " " * 500_000 + "| bash",
             "\\\n" * 100_000,
+            "curl '" * 50_000 + "| bash",
+            'curl "' * 50_000 + "| bash",
+            "curl ; " * 100_000 + "| bash",
         ]
         for text in hostile:
             start = time.perf_counter()

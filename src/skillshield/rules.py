@@ -222,10 +222,39 @@ _RUG_PULL_RE = re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTI
 # number of times.
 _FETCHER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
 _LINE_CONTINUATION = re.compile(r"\\\r?\n[ \t]*")
-_COMMAND_SEPARATORS = re.compile(r";|&&|\|\|")
+# Commands that print their arguments: a fetcher's name after them is text, not a download.
+_TEXT_PRINTERS = {"echo", "printf"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 _PYTHON = re.compile(r"python[0-9.]*")
 _SUDO_OPTIONS_WITH_ARGUMENT = {"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t"}
+
+
+def _shell_reads_stdin(arguments: list[str]) -> bool:
+    """A shell runs stdin as a script unless it is given -c or a script file (-s keeps stdin)."""
+    j = 0
+    while j < len(arguments):
+        token = arguments[j]
+        j += 1
+        if token == "-" or re.match(r"\d*[<>&]", token):
+            return True
+        if token == "--":
+            return j >= len(arguments)  # anything after it is a script file
+        if not token.startswith("-"):
+            return False  # a script file
+        if token.startswith("--"):
+            if token in ("--rcfile", "--init-file"):
+                j += 1
+            continue
+        for index, flag in enumerate(token[1:], start=1):
+            if flag == "c":
+                return False
+            if flag == "s":
+                return True
+            if flag in "oO":
+                if index == len(token) - 1:
+                    j += 1
+                break
+    return True
 
 
 def _reads_script_from_stdin(segment: str) -> bool:
@@ -240,7 +269,7 @@ def _reads_script_from_stdin(segment: str) -> bool:
         return False
     name = tokens[i].rsplit("/", 1)[-1].lower()
     if name in _SHELLS:
-        return True
+        return _shell_reads_stdin(tokens[i + 1 :])
     if not _PYTHON.fullmatch(name):
         return False
     # Python runs stdin as a script unless it is given -c, -m or a script file, so options
@@ -266,27 +295,103 @@ def _reads_script_from_stdin(segment: str) -> bool:
     return True
 
 
+def _split_commands(line: str) -> list[list[tuple[str, str]]]:
+    """Cut a line into commands and their pipeline stages, reading quotes as a shell does.
+
+    Commands end at an unquoted ; && or ||, stages at an unquoted |. Each stage comes back
+    twice: as written, and with the quoted text left out, so that a word inside quotes is not
+    taken for a command. Single quotes run nothing; a double-quoted string keeps its text only
+    when it holds a command substitution ($(...) or a backtick).
+    """
+    commands: list[list[tuple[str, str]]] = []
+    stages: list[tuple[str, str]] = []
+    written: list[str] = []
+    outside: list[str] = []
+    quoted: list[str] = []
+    quote = ""
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if quote:
+            written.append(ch)
+            if ch == "\\" and quote == '"' and i + 1 < n:
+                written.append(line[i + 1])
+                quoted.append(ch + line[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                text = "".join(quoted)
+                keep = quote == '"' and ("$(" in text or "`" in text)
+                outside.append(text if keep else " ")
+                quoted = []
+                quote = ""
+            else:
+                quoted.append(ch)
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            written.append(ch)
+            i += 1
+            continue
+        following = line[i + 1] if i + 1 < n else ""
+        if ch == "\\" and following:
+            written.append(ch + following)
+            outside.append("  ")
+            i += 2
+            continue
+        if ch == ";" or (ch in "&|" and following == ch):
+            stages.append(("".join(written), "".join(outside)))
+            commands.append(stages)
+            stages, written, outside = [], [], []
+            i += 1 if ch == ";" else 2
+            continue
+        if ch == "|":
+            stages.append(("".join(written), "".join(outside)))
+            written, outside = [], []
+            i += 1
+            continue
+        written.append(ch)
+        outside.append(ch)
+        i += 1
+    if quote:  # a quote that is never closed runs to the end of the line
+        text = "".join(quoted)
+        keep = quote == '"' and ("$(" in text or "`" in text)
+        outside.append(text if keep else " ")
+    stages.append(("".join(written), "".join(outside)))
+    commands.append(stages)
+    return commands
+
+
+def _is_download(outside_quotes: str) -> bool:
+    """Whether a pipeline stage runs curl or wget, rather than printing the word."""
+    if not _FETCHER.search(outside_quotes):
+        return False
+    if "$(" in outside_quotes or "`" in outside_quotes:
+        return True  # `echo "$(curl ...)"` prints the download, it does not just name it
+    words = outside_quotes.split()
+    return not (words and words[0].lower() in _TEXT_PRINTERS)
+
+
 def _pipe_to_interpreter_matches(text: str) -> list[str]:
     """Find `curl ... | bash`: a download piped into a shell or into python reading stdin."""
     matches: list[str] = []
     # A backslash at the end of a line continues the command on the next one.
     text = _LINE_CONTINUATION.sub(" ", text)
     for line in text.splitlines():
-        if "|" not in line:
+        if "|" not in line or not _FETCHER.search(line):
             continue
-        # Commands end at ; && || so a download followed by a separate command that is
-        # piped into a shell is not a match.
-        for command in _COMMAND_SEPARATORS.split(line):
-            stages = command.split("|")
-            first_fetch = next((n for n, s in enumerate(stages) if _FETCHER.search(s)), None)
-            if first_fetch is None:
+        for stages in _split_commands(line):
+            first = next((n for n, (_, seen) in enumerate(stages) if _is_download(seen)), None)
+            if first is None:
                 continue
             # The snippet starts at the download command, not at the words before it.
-            download = stages[first_fetch]
-            download = download[_FETCHER.search(download).start() :]
-            for end in range(first_fetch + 1, len(stages)):
-                if _reads_script_from_stdin(stages[end]):
-                    parts = [download, *stages[first_fetch + 1 : end + 1]]
+            download = stages[first][0]
+            fetcher = _FETCHER.search(download)
+            download = download[fetcher.start() :] if fetcher else download
+            for end in range(first + 1, len(stages)):
+                if _reads_script_from_stdin(stages[end][0]):
+                    parts = [download, *(s for s, _ in stages[first + 1 : end + 1])]
                     matches.append(" | ".join(p.strip() for p in parts)[:200])
                     break
     return matches
