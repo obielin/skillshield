@@ -122,6 +122,7 @@ def cmd_scan(args) -> int:
                 "critical": report.critical_count,
                 "errors": report.error_count,
                 "flag_rate": report.flag_rate,
+                "unscanned": report.metadata.get("unscanned") or [],
                 "results": [
                     {
                         "skill": r.skill_name,

@@ -27,16 +27,27 @@ import os
 import sys
 from pathlib import Path
 
-from skillshield.models import SkillScanResult
+from skillshield.models import BatchScanReport, SkillScanResult, missing_source_note
 from skillshield.rules import Severity
-from skillshield.sarif import results_to_sarif
-from skillshield.scanner import SKILL_EXTENSIONS, SkillScanner
+from skillshield.sarif import report_to_sarif
+from skillshield.scanner import (
+    COMPILED_PYTHON_EXTENSIONS,
+    SKILL_EXTENSIONS,
+    SkillScanner,
+    _dir_is_skipped,
+)
 
 LEVELS = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 FAIL_ON = {"none": None, "low": "LOW", "medium": "MEDIUM", "high": "HIGH", "critical": "CRITICAL"}
 SEVERITIES = {s.value.lower(): s for s in Severity}
-# Directories that hold tooling or dependencies, never skills the repo ships.
-SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache"}
+
+# The job summary is written to GITHUB_STEP_SUMMARY, which GitHub Actions caps
+# at 1 MiB per step; an oversized summary fails to upload. A scan of a large
+# repository can skip or flag thousands of files, so every list in the summary
+# shows a bounded sample and keeps the total count.
+MAX_UNSCANNED_LISTED = 20
+MAX_FLAGGED_LISTED = 50
+MAX_ERRORS_LISTED = 50
 
 
 class SettingError(ValueError):
@@ -47,43 +58,101 @@ def _rank(level: str) -> int:
     return LEVELS.index(level) if level in LEVELS else -1
 
 
-def _relative(path: Path, workspace: Path) -> str:
+def _normalised(path: Path) -> Path:
+    """A stable identity for a path, without changing the path used to read it."""
     try:
-        return path.resolve().relative_to(workspace.resolve()).as_posix()
+        return path.resolve()
+    except (OSError, RuntimeError):
+        # A broken link or a symlink loop is reported as a missing path.
+        return path
+
+
+def _display_path(path: Path, workspace: Path) -> str:
+    """The submitted path relative to the workspace, without following symlinks."""
+    absolute = Path(os.path.abspath(path))
+    root = Path(os.path.abspath(workspace))
+    try:
+        return absolute.relative_to(root).as_posix()
     except ValueError:
-        return path.as_posix()
+        return absolute.as_posix()
+
+
+def _scan_identity(path: Path) -> tuple[Path, bool]:
+    """Identity for deduplication: resolved target plus how the file is scanned."""
+    return (_normalised(path), path.suffix.lower() in COMPILED_PYTHON_EXTENSIONS)
+
+
+def _is_scanned(path: Path, root: Path) -> bool:
+    """Whether a file under root belongs in a CI scan.
+
+    Compiled Python is collected wherever it sits: bytecode is what a reader
+    skips, and a directory name or a submitted pyvenv.cfg must not hide it.
+    """
+    suffix = path.suffix.lower()
+    if suffix in COMPILED_PYTHON_EXTENSIONS:
+        return True
+    current = root
+    for part in path.relative_to(root).parts[:-1]:
+        current = current / part
+        if _dir_is_skipped(current):
+            return False
+    return suffix in SKILL_EXTENSIONS
+
+
+def _scan_paths(
+    paths: list[str], workspace: Path, min_severity: Severity = Severity.INFO
+) -> tuple[list[SkillScanResult], list[str], list[str]]:
+    """Scan each path once and collect the files the directory policy skipped."""
+    scanner = SkillScanner(min_severity=min_severity)
+    results: list[SkillScanResult] = []
+    missing: list[str] = []
+    skipped: list[tuple[Path, str]] = []
+    scanned: set[tuple[Path, bool]] = set()
+    for raw in paths:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = workspace / p
+        # Keep p for reading: its suffix decides how the file is scanned. Only
+        # key uses the resolved path, so aliases still count as one file.
+        key = _normalised(p)
+        directory = key.is_dir()
+        if directory:
+            all_files = sorted(f for f in key.rglob("*") if f.is_file())
+            keys = {f: _scan_identity(f) for f in all_files}
+            displays = {f: _display_path(p / f.relative_to(key), workspace) for f in all_files}
+            files = [f for f in all_files if keys[f] not in scanned and _is_scanned(f, key)]
+            selected = {keys[f] for f in files}
+            # A file an earlier input already scanned is not skipped: the
+            # report must not call a file unscanned while its result is listed.
+            skipped.extend(
+                (f, displays[f])
+                for f in all_files
+                if keys[f] not in selected and keys[f] not in scanned
+            )
+        elif key.is_file():
+            files = [] if _scan_identity(p) in scanned else [p]
+        else:
+            missing.append(raw)
+            continue
+        for f in files:
+            scanned.add(_scan_identity(f))
+            result = scanner.scan_file(f)
+            # Name the file as it was submitted, not by the target of a symlink.
+            display = p / f.relative_to(key) if directory else f
+            result.skill_name = _display_path(display, workspace)
+            results.append(result)
+    return (
+        results,
+        missing,
+        list(dict.fromkeys(display for f, display in skipped if _scan_identity(f) not in scanned)),
+    )
 
 
 def scan_paths(
     paths: list[str], workspace: Path, min_severity: Severity = Severity.INFO
 ) -> tuple[list[SkillScanResult], list[str]]:
     """Scan each path. Returns the results and the paths that do not exist."""
-    scanner = SkillScanner(min_severity=min_severity)
-    results: list[SkillScanResult] = []
-    missing: list[str] = []
-    for raw in paths:
-        p = Path(raw)
-        if not p.is_absolute():
-            p = workspace / p
-        if p.is_dir():
-            files = sorted(
-                f
-                for f in p.rglob("*")
-                if f.is_file()
-                and f.suffix.lower() in SKILL_EXTENSIONS
-                and not SKIP_DIRS.intersection(f.relative_to(p).parts[:-1])
-            )
-        elif p.is_file():
-            files = [p]
-        else:
-            missing.append(raw)
-            continue
-        for f in files:
-            result = scanner.scan_file(f)
-            # scan_file names a result by file name only; use the path relative
-            # to the workspace so findings point at the right file.
-            result.skill_name = _relative(f, workspace)
-            results.append(result)
+    results, missing, _ = _scan_paths(paths, workspace, min_severity)
     return results, missing
 
 
@@ -105,14 +174,47 @@ def highest_level(results: list[SkillScanResult]) -> str:
     return max((r.risk_level for r in read), key=_rank)
 
 
+def _in_tooling_dir(name: str, workspace: Path) -> bool:
+    """Whether a skipped path sits in a tooling or dependency directory.
+
+    The directories are checked on disk, not by name alone: a skill can ship
+    its own `.venv/` to pass off payload files as an environment, and only a
+    directory that carries `pyvenv.cfg` is a real one. This is the same rule
+    the scanner applies to the files it reads.
+    """
+    current = workspace
+    for part in name.split("/")[:-1]:
+        current = current / part
+        if _dir_is_skipped(current):
+            return True
+    return False
+
+
+def _visible_unscanned(unscanned: list[str], workspace: Path) -> list[str]:
+    """The skipped paths worth showing first, bounded for the job summary.
+
+    Tooling and dependency directories come last, so a payload outside them
+    still reaches the list on a repository whose .git alone could fill it.
+    """
+    visible = [name for name in unscanned if not _in_tooling_dir(name, workspace)]
+    hidden = [name for name in unscanned if _in_tooling_dir(name, workspace)]
+    return (visible + hidden)[:MAX_UNSCANNED_LISTED]
+
+
 def summary_markdown(
-    results: list[SkillScanResult], missing: list[str], fail_on: str | None, exit_code: int
+    results: list[SkillScanResult],
+    missing: list[str],
+    fail_on: str | None,
+    exit_code: int,
+    unscanned: list[str] | None = None,
+    workspace: Path | None = None,
 ) -> str:
     """A Markdown summary of the scan, for the GitHub job summary."""
     verdict = {0: "Passed", 1: "Failed", 2: "Error"}[exit_code]
     threshold = fail_on or "never"
     flagged = [r for r in results if r.risk_level not in ("SAFE", "ERROR")]
     errors = [r for r in results if r.risk_level == "ERROR"]
+    unscanned = unscanned or []
     lines = [
         f"## SkillShield scan: {verdict}",
         "",
@@ -124,39 +226,106 @@ def summary_markdown(
         f"| Flagged files | {len(flagged)} |",
         f"| Unreadable files | {len(errors)} |",
         f"| Missing paths | {len(missing)} |",
+        f"| Unscanned files | {len(unscanned)} |",
         "",
     ]
     if flagged:
         lines += ["| File | Risk | Score | Findings |", "|---|---|---|---|"]
-        for r in sorted(flagged, key=lambda r: (-_rank(r.risk_level), r.skill_name)):
+        ordered = sorted(flagged, key=lambda r: (-_rank(r.risk_level), r.skill_name))
+        for r in ordered[:MAX_FLAGGED_LISTED]:
             ids = ", ".join(f.rule_id for f in r.findings)
             lines.append(f"| `{r.skill_name}` | {r.risk_level} | {r.risk_score:.0f} | {ids} |")
+        omitted_flagged = len(ordered) - MAX_FLAGGED_LISTED
+        if omitted_flagged > 0:
+            lines.append(f"| ... and {omitted_flagged} more, not listed here | | | |")
         lines.append("")
-    for r in errors:
+    for r in errors[:MAX_ERRORS_LISTED]:
         lines.append(f"- Could not read `{r.skill_name}`: {r.error}")
-    for m in missing:
+    omitted_errors = len(errors) - MAX_ERRORS_LISTED
+    if omitted_errors > 0:
+        lines.append(f"- ... and {omitted_errors} more, not listed here")
+    for m in missing[:MAX_ERRORS_LISTED]:
         lines.append(f"- Path does not exist: `{m}`")
+    omitted_missing = len(missing) - MAX_ERRORS_LISTED
+    if omitted_missing > 0:
+        lines.append(f"- ... and {omitted_missing} more, not listed here")
+    if unscanned:
+        shown = _visible_unscanned(unscanned, workspace or Path("."))
+        lines += ["Files not scanned:", ""]
+        for name in shown:
+            lines.append(f"- `{name}`")
+        omitted = len(unscanned) - len(shown)
+        if omitted > 0:
+            lines.append(f"- ... and {omitted} more, not listed here")
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
-def console_report(results: list[SkillScanResult], missing: list[str], exit_code: int) -> str:
+def console_report(
+    results: list[SkillScanResult],
+    missing: list[str],
+    exit_code: int,
+    unscanned: list[str] | None = None,
+    sarif_file: str | None = None,
+) -> str:
     """Plain text lines for the job log, with GitHub annotations for flagged files."""
     lines = []
-    for r in results:
+    annotated = 0
+    unread = 0
+    # Annotate the worst files first, in the order the summary lists them, so a
+    # bounded log never spends its slots on the mildest findings.
+    ordered = sorted(
+        results, key=lambda r: (r.risk_level != "ERROR", -_rank(r.risk_level), r.skill_name)
+    )
+    for r in ordered:
         if r.risk_level == "ERROR":
+            if unread >= MAX_ERRORS_LISTED:
+                continue
+            unread += 1
             lines.append(
                 f"::error file={r.skill_name}::SkillShield could not read this file: {r.error}"
             )
         elif r.risk_level != "SAFE":
+            if annotated >= MAX_FLAGGED_LISTED:
+                continue
+            annotated += 1
             ids = ", ".join(f"{f.rule_id} {f.name}" for f in r.findings)
+            note = missing_source_note(r)
+            if note:
+                ids = f"{ids}; {note}"
             level = r.risk_level
             kind = "error" if exit_code == 1 and level in ("HIGH", "CRITICAL") else "warning"
             line = r.findings[0].line_numbers[0] if r.findings and r.findings[0].line_numbers else 1
             lines.append(
                 f"::{kind} file={r.skill_name},line={line},title=SkillShield {level}::{ids}"
             )
-    for m in missing:
+    flagged_total = sum(1 for r in results if r.risk_level not in ("SAFE", "ERROR"))
+    if flagged_total > annotated:
+        lines.append(
+            f"::warning::SkillShield flagged {flagged_total} file(s); the {annotated} worst "
+            f"are annotated here and in the job summary, the other "
+            f"{flagged_total - annotated} are counted only."
+        )
+    unread_total = sum(1 for r in results if r.risk_level == "ERROR")
+    if unread_total > unread:
+        lines.append(
+            f"::warning::SkillShield could not read {unread_total} file(s); the first "
+            f"{unread} are annotated here, the other {unread_total - unread} are counted only."
+        )
+    for m in missing[:MAX_ERRORS_LISTED]:
         lines.append(f"::error::SkillShield: path does not exist: {m}")
+    if len(missing) > MAX_ERRORS_LISTED:
+        lines.append(
+            f"::warning::SkillShield: {len(missing)} paths do not exist; the first "
+            f"{MAX_ERRORS_LISTED} are annotated here, the other "
+            f"{len(missing) - MAX_ERRORS_LISTED} are counted only."
+        )
+    if unscanned:
+        where = "the job summary and SARIF report" if sarif_file else "the job summary"
+        lines.append(
+            f"::warning::SkillShield skipped {len(unscanned)} file(s) it could not scan; "
+            f"they are listed in {where}."
+        )
     lines.append(
         f"SkillShield scanned {len(results)} file(s); highest risk level {highest_level(results)}."
     )
@@ -196,16 +365,17 @@ def run(env: dict[str, str]) -> int:
         print(f"::error::SkillShield: {e}")
         return 2
 
-    results, missing = scan_paths(s["paths"], s["workspace"], s["min_severity"])
+    results, missing, skipped = _scan_paths(s["paths"], s["workspace"], s["min_severity"])
     exit_code = decide(results, missing, s["fail_on"])
 
     if s["sarif_file"]:
-        _write(s["sarif_file"], json.dumps(results_to_sarif(results), indent=2))
+        report = BatchScanReport(results=results, metadata={"unscanned": skipped})
+        _write(s["sarif_file"], json.dumps(report_to_sarif(report), indent=2))
 
-    print(console_report(results, missing, exit_code))
+    print(console_report(results, missing, exit_code, skipped, s["sarif_file"]))
     _write(
         env.get("GITHUB_STEP_SUMMARY"),
-        summary_markdown(results, missing, s["fail_on"], exit_code),
+        summary_markdown(results, missing, s["fail_on"], exit_code, skipped, s["workspace"]),
         "a",
     )
 

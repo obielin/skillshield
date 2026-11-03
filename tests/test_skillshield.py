@@ -853,6 +853,234 @@ class TestUnreadableFiles:
         assert "Permission denied" in errors[0]["error"]
 
 
+class TestCompiledPythonPayload:
+    def test_flags_pyc_without_source(self, tmp_path):
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        report = SkillScanner().scan_directory(tmp_path)
+        results = {r.skill_name: r for r in report.results}
+        assert "tool.pyc" in results
+        assert results["tool.pyc"].findings
+        finding = results["tool.pyc"].findings[0]
+        assert finding.rule_id == "SG-014"
+        assert finding.severity == Severity.HIGH
+        assert "no matching tool.py" in finding.snippets[0]
+
+    def test_flags_pyc_even_with_source(self, tmp_path):
+        (tmp_path / "tool.py").write_text("print('hello')\n", encoding="utf-8")
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        report = SkillScanner().scan_directory(tmp_path)
+        results = {r.skill_name: r for r in report.results}
+        assert "tool.pyc" in results
+        assert results["tool.pyc"].findings[0].severity == Severity.HIGH
+
+    def test_clean_folder_not_flagged(self, tmp_path):
+        (tmp_path / "readme.md").write_text("# hello\n", encoding="utf-8")
+        report = SkillScanner().scan_directory(tmp_path)
+        assert all(not r.findings for r in report.results)
+
+    def test_scanning_one_pyc_uses_the_compiled_check(self, tmp_path):
+        target = tmp_path / "tool.pyc"
+        target.write_bytes(b"bytecode")
+        result = SkillScanner().scan_file(target)
+        assert [f.rule_id for f in result.findings] == ["SG-014"]
+        assert result.findings[0].severity == Severity.HIGH
+        assert result.risk_level == "HIGH"
+
+    def test_cache_tagged_pyc_finds_its_source(self, tmp_path):
+        import importlib.util
+
+        source = tmp_path / "tool.py"
+        source.write_text("print('hello')\n", encoding="utf-8")
+        compiled = Path(importlib.util.cache_from_source(str(source)))
+        compiled.parent.mkdir()
+        compiled.write_bytes(b"bytecode")
+        result = SkillScanner().scan_file(compiled)
+        assert [f.rule_id for f in result.findings] == ["SG-014"]
+        assert "no matching" not in result.findings[0].snippets[0]
+
+    def test_a_rule_set_without_sg014_does_not_report_it(self, tmp_path):
+        target = tmp_path / "tool.pyc"
+        target.write_bytes(b"bytecode")
+        result = SkillScanner(rules=[]).scan_file(target)
+        assert result.findings == []
+        assert result.risk_level == "SAFE"
+
+    def test_pyc_asked_for_as_an_extension_is_reported_once(self, tmp_path):
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        report = SkillScanner().scan_directory(tmp_path, extensions={".pyc"})
+        assert [r.skill_name for r in report.results] == ["tool.pyc"]
+
+    def test_summary_and_sarif_name_the_missing_source(self, tmp_path):
+        from skillshield.sarif import report_to_sarif
+
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        report = SkillScanner().scan_directory(tmp_path)
+        assert "no matching tool.py" in report.summary()
+        message = report_to_sarif(report)["runs"][0]["results"][0]["message"]["text"]
+        assert "no matching tool.py" in message
+
+    def test_ci_scan_collects_pyc_from_pycache(self, tmp_path):
+        from skillshield.ci import scan_paths
+
+        cache = tmp_path / "__pycache__"
+        cache.mkdir()
+        (cache / "tool.cpython-310.pyc").write_bytes(b"bytecode")
+        results, missing = scan_paths(["."], tmp_path)
+        assert missing == []
+        flagged = [r for r in results if any(f.rule_id == "SG-014" for f in r.findings)]
+        assert [r.skill_name for r in flagged] == ["__pycache__/tool.cpython-310.pyc"]
+
+    def test_directory_scan_reports_venv_bytecode_with_pyvenv_cfg(self, tmp_path):
+        site = tmp_path / ".venv" / "lib" / "python3.12" / "site-packages" / "pkg" / "__pycache__"
+        site.mkdir(parents=True)
+        (site / "x.cpython-312.pyc").write_bytes(b"bytecode")
+        (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        report = SkillScanner().scan_directory(tmp_path)
+        assert sorted(r.skill_name for r in report.results) == [
+            ".venv/lib/python3.12/site-packages/pkg/__pycache__/x.cpython-312.pyc",
+            "tool.pyc",
+        ]
+        assert all(r.findings[0].rule_id == "SG-014" for r in report.results)
+        assert report.metadata == {"unscanned": [".venv/pyvenv.cfg"]}
+        assert "UNSCANNED (1)" in report.summary()
+
+    def test_directory_scan_lists_files_it_did_not_scan(self, tmp_path):
+        (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        (scripts / "install").write_text("#!/bin/sh\n", encoding="utf-8")
+        (scripts / "setup.ps1").write_text("Write-Host hello\n", encoding="utf-8")
+        (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
+        report = SkillScanner().scan_directory(tmp_path)
+        assert [r.skill_name for r in report.results] == ["SKILL.md"]
+        assert report.metadata["unscanned"] == [
+            "helper.zip",
+            "scripts/install",
+            "scripts/setup.ps1",
+        ]
+        assert "UNSCANNED (3)" in report.summary()
+
+    def test_a_shipped_dot_venv_without_pyvenv_cfg_is_scanned(self, tmp_path):
+        # The name alone does not make a local environment: this .venv ships
+        # with the skill and must not hide its bytecode.
+        site = tmp_path / ".venv" / "bin"
+        site.mkdir(parents=True)
+        (site / "payload.pyc").write_bytes(b"bytecode")
+        report = SkillScanner().scan_directory(tmp_path)
+        assert [r.skill_name for r in report.results] == [".venv/bin/payload.pyc"]
+        assert report.results[0].findings[0].rule_id == "SG-014"
+        assert report.metadata == {}
+
+    def test_progress_callback_includes_compiled_files(self, tmp_path):
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        seen: list[tuple[str, int, int]] = []
+        report = SkillScanner().scan_directory(
+            tmp_path, on_progress=lambda name, done, total: seen.append((name, done, total))
+        )
+        assert [r.skill_name for r in report.results] == ["tool.pyc"]
+        assert seen == [("tool.pyc", 1, 1)]
+
+    def test_configured_sg014_rule_is_used_for_filtering_and_finding(self, tmp_path):
+        from dataclasses import replace
+
+        from skillshield.rules import RULE_COMPILED_PYTHON
+
+        target = tmp_path / "tool.pyc"
+        target.write_bytes(b"bytecode")
+        custom = replace(
+            RULE_COMPILED_PYTHON, severity=Severity.INFO, name="Custom compiled Python"
+        )
+        quiet = SkillScanner(rules=[custom], min_severity=Severity.HIGH).scan_file(target)
+        assert quiet.findings == []
+        loud = SkillScanner(rules=[custom], min_severity=Severity.INFO).scan_file(target)
+        assert loud.findings[0].rule is custom
+        assert loud.findings[0].severity == Severity.INFO
+
+    def test_a_single_pyo_is_flagged_like_a_pyc(self, tmp_path):
+        target = tmp_path / "skill.pyo"
+        target.write_bytes(b"bytecode")
+        result = SkillScanner().scan_file(target)
+        assert [f.rule_id for f in result.findings] == ["SG-014"]
+        assert "(no matching " in result.findings[0].snippets[0]
+
+    def test_cache_tagged_pyo_finds_its_source(self, tmp_path):
+        from skillshield.models import missing_source_note
+
+        cache = tmp_path / "__pycache__"
+        cache.mkdir()
+        (cache / "tool.cpython-310.pyo").write_bytes(b"bytecode")
+        (tmp_path / "tool.py").write_text("print('hello')\n", encoding="utf-8")
+        result = SkillScanner().scan_file(cache / "tool.cpython-310.pyo")
+        assert missing_source_note(result) == ""
+
+    def test_dependency_directory_bytecode_is_reported_by_ci(self, tmp_path):
+        from skillshield.ci import scan_paths
+
+        vendored = tmp_path / ".venv" / "lib" / "site-packages" / "pkg" / "__pycache__"
+        vendored.mkdir(parents=True)
+        (vendored / "tool.cpython-310.pyc").write_bytes(b"bytecode")
+        (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+        shipped = tmp_path / "scripts" / "__pycache__"
+        shipped.mkdir(parents=True)
+        (shipped / "helper.cpython-310.pyc").write_bytes(b"bytecode")
+        planted = tmp_path / "skills" / ".venv" / "bin"
+        planted.mkdir(parents=True)
+        (planted / "hidden.pyc").write_bytes(b"bytecode")
+        results, missing = scan_paths(["."], tmp_path)
+        assert missing == []
+        names = [r.skill_name for r in results]
+        assert "scripts/__pycache__/helper.cpython-310.pyc" in names
+        assert "skills/.venv/bin/hidden.pyc" in names
+        assert ".venv/lib/site-packages/pkg/__pycache__/tool.cpython-310.pyc" in names
+        assert all(r.findings[0].rule_id == "SG-014" for r in results)
+
+    def test_a_compiled_file_with_its_source_gets_no_note(self, tmp_path):
+        from skillshield.ci import scan_paths
+        from skillshield.models import missing_source_note
+
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        (scripts / "tool.py").write_text("print('hi')\n", encoding="utf-8")
+        (scripts / "tool.pyc").write_bytes(b"bytecode")
+        results, _ = scan_paths(["."], tmp_path)
+        result = next(r for r in results if r.skill_name.endswith("tool.pyc"))
+        assert result.findings
+        assert missing_source_note(result) == ""
+
+    def test_cli_json_lists_unscanned_paths(self, tmp_path, monkeypatch, capsys):
+        import json
+
+        (tmp_path / "SKILL.md").write_text("# hello\n", encoding="utf-8")
+        (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
+        assert _run_cli(monkeypatch, "scan", str(tmp_path), "--format", "json") == 0
+        out = json.loads(capsys.readouterr().out)
+        assert [r["skill"] for r in out["results"]] == ["SKILL.md"]
+        assert out["unscanned"] == ["helper.zip"]
+
+    def test_a_directory_named_like_the_source_does_not_count_as_source(self, tmp_path):
+        (tmp_path / "tool.pyc").write_bytes(b"bytecode")
+        (tmp_path / "tool.py").mkdir()
+        result = SkillScanner().scan_file(tmp_path / "tool.pyc")
+        assert "no matching tool.py" in result.findings[0].snippets[0]
+
+    def test_a_compiled_file_that_cannot_be_read_is_an_error(self, tmp_path, monkeypatch):
+        target = tmp_path / "skill.pyc"
+        target.write_bytes(b"bytecode")
+        real_open = Path.open
+
+        def deny(self, *args, **kwargs):
+            if self == target:
+                raise PermissionError(13, "Permission denied", str(self))
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", deny)
+        result = SkillScanner().scan_file(target)
+        assert result.risk_level == "ERROR"
+        assert result.error
+        assert result.findings == []
+
+
 # ── CLI ────────────────────────────────────────────────────────
 
 
