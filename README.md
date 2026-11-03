@@ -191,10 +191,10 @@ This text has prompt injection and a URL but no file system access, so SG-011 do
 | Command | Exit 1 when | Exit 2 when | Otherwise |
 |---|---|---|---|
 | `skillshield scan` on one file or stdin | the risk level is CRITICAL or HIGH | the path does not exist, or the file cannot be read | 0 |
-| `skillshield scan` on a directory | at least one file is CRITICAL | the path does not exist | 0 |
+| `skillshield scan` on a directory | at least one file is CRITICAL or HIGH | the path does not exist, or any file cannot be read | 0 |
 | `skillshield check` | there is at least one finding | | 0 |
 
-A directory scan with only HIGH findings exits 0. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate.
+A directory scan with only HIGH findings exits 1. A file that cannot be read gets the level ERROR and exits 2, for a single file or within a directory scan (exit 2 wins when a directory has both an unreadable file and a CRITICAL or HIGH one), so CI does not mistake it for a clean pass. In a directory scan, unreadable files are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate.
 
 ### Python
 
