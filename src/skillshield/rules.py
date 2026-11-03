@@ -60,9 +60,16 @@ _PROMPT_INJECTION_PATTERNS = [
 ]
 
 # Chinese, Simplified and Traditional (#66). A pattern stays inside one sentence,
-# and a negation right before the verb ("請勿忽略…", "不會覆蓋…") is not an override.
+# and a negation right before the verb, with or without 再 ("請勿忽略…", "不要再忽略…",
+# "不會覆蓋…"), is not an override.
 _ZH_GAP = r"[^。！？!?\n]{0,8}?"
-_ZH_NOT = r"(?<!不要)(?<!不會)(?<!不会)(?<!不可)(?<!不能)(?<!不得)(?<!勿)(?<!別)(?<!别)(?<!不)"
+_ZH_NOT = (
+    r"(?<!不要)(?<!不會)(?<!不会)(?<!不可)(?<!不能)(?<!不得)(?<!勿)(?<!別)(?<!别)(?<!不)"
+    r"(?<!不要再)(?<!不會再)(?<!不会再)(?<!不可再)(?<!不能再)(?<!不得再)(?<!勿再)(?<!別再)"
+    r"(?<!别再)(?<!不再)"
+)
+# "If you forget the earlier instructions…" is not a request to forget them.
+_ZH_NOT_IF = r"(?<!如果你)(?<!如果)(?<!若你)(?<!若)(?<!要是你)(?<!萬一你)(?<!万一你)"
 _ZH_SYSTEM_PROMPT = r"(?:系統提示|系统提示)"
 _ZH_NO_LIMITS = r"(?:沒有|没有|不受|無|无)(?:任何)?(?:限制|約束|约束|規則|规则|審查|审查)"
 
@@ -74,8 +81,11 @@ _PROMPT_INJECTION_PATTERNS_ZH = [
     + r"(?:之前|先前|以前|此前|以上|上面|上述|前面|前述)"
     + _ZH_GAP
     + r"(?:指令|指示|提示詞|提示词|提示語|提示语)",
-    # 忘記之前的一切 / 忘掉以上所有指令
-    _ZH_NOT + r"(?:忘記|忘记|忘掉)你?(?:之前|先前|以前|以上|上面|前面)的?(?:所有|全部|一切)",
+    # 忘記之前的一切 / 忘掉以上所有指令 / 忘记之前的指令
+    _ZH_NOT
+    + _ZH_NOT_IF
+    + r"(?:忘記|忘记|忘掉)你?(?:之前|先前|以前|以上|上面|前面)的?"
+    + r"(?:所有|全部|一切|指令|指示|提示詞|提示词)",
     # 覆蓋你的系統提示 / 新的系统提示：
     _ZH_NOT
     + r"(?:覆蓋|覆盖|取代|替換|替换|改寫|改写|無視|无视|忽略)"
@@ -96,9 +106,9 @@ _PROMPT_INJECTION_PATTERNS_ZH = [
 ]
 
 # Japanese (#66). A negated verb right after the match ("無視しないで",
-# "変更しません", "無効にしないで") is not an override.
+# "変更しません", "無効にしないで", "忘れません") is not an override.
 _JA_GAP = r"[^。！？!?\n]{0,10}?"
-_JA_NOT = r"(?!(?:に|化)?(?:しな|せず|するな|しては|しません|させな)|ない|ず)"
+_JA_NOT = r"(?!(?:に|化)?(?:しな|せず|するな|しては|しません|させな)|ない|ず|ません)"
 
 _PROMPT_INJECTION_PATTERNS_JA = [
     # 以前の指示をすべて無視してください / 上記の指示は忘れて
