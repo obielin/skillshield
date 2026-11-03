@@ -238,13 +238,15 @@ def _looks_like_file(token: str) -> bool:
     return "." in token or "/" in token
 
 
-def _stage_words(segment: str) -> list[str]:
-    """Split a pipeline stage into words, reading quotes as a shell does.
+def _read_stage(segment: str) -> tuple[list[str], str]:
+    """Split a pipeline stage into words, reading quotes and escapes as a shell does.
 
-    The words end where the command ends: at a `#` comment, or at a closing backtick or
-    parenthesis that was opened before this stage, as in "`curl ... | bash` to run" or
-    "(curl ... | bash)". Quoted text, and a `$(...)` opened inside the stage, stay in their
-    word, so `bash --rcfile "$(printf x)" script.sh` keeps its script file.
+    Returns the words and the source text they were read from. The words end where the command
+    ends: at a `#` comment, or at a closing backtick or parenthesis that was opened before this
+    stage, as in "`curl ... | bash` to run" or "(curl ... | bash)". Quoted text, and a `$(...)`
+    opened inside the stage, stay in their word, so `bash --rcfile "$(printf x)" script.sh`
+    keeps its script file. An unquoted backslash escapes the next character, so `\\bash` (the
+    way to skip an alias) is the word `bash`.
     """
     segment = segment.lstrip("({[` \t")
     words: list[str] = []
@@ -252,6 +254,7 @@ def _stage_words(segment: str) -> list[str]:
     quote = ""
     depth = 0
     i, n = 0, len(segment)
+    end = n
     while i < n:
         ch = segment[i]
         i += 1
@@ -269,23 +272,29 @@ def _stage_words(segment: str) -> list[str]:
             if word:
                 words.append("".join(word))
                 word = []
+        elif ch == "\\" and i < n:
+            word.append(segment[i])
+            i += 1
         elif ch == "#" and not word:
+            end = i - 1
             break
         elif ch == "(":
             depth += 1
             word.append(ch)
         elif ch == ")":
             if not depth:
+                end = i - 1
                 break
             depth -= 1
             word.append(ch)
         elif ch == "`" and i > 1 and not segment[i - 2].isspace():
-            break  # a backtick right after a word closes inline code opened before the stage
+            end = i - 1  # a backtick right after a word closes inline code opened before the stage
+            break
         else:
             word.append(ch)
     if word:
         words.append("".join(word))
-    return words
+    return words, segment[:end].strip()
 
 
 def _shell_reads_stdin(arguments: list[str]) -> bool:
@@ -320,7 +329,7 @@ def _shell_reads_stdin(arguments: list[str]) -> bool:
 
 def _reads_script_from_stdin(segment: str) -> bool:
     """Whether this pipeline stage runs what it is fed as a script."""
-    tokens = _stage_words(segment)
+    tokens, _ = _read_stage(segment)
     i = 0
     if tokens and tokens[0].lower() == "sudo":
         i = 1
@@ -461,7 +470,9 @@ def _pipe_to_interpreter_matches(text: str) -> list[str]:
             download = download[fetcher.start() :] if fetcher else download
             for end in range(first + 1, len(stages)):
                 if _reads_script_from_stdin(stages[end][0]):
-                    rest = (" ".join(_stage_words(s)) for s, _ in stages[first + 1 : end + 1])
+                    # The later stages keep their source spacing, so the scanner can find the
+                    # snippet in the text and report its line.
+                    rest = (_read_stage(s)[1] for s, _ in stages[first + 1 : end + 1])
                     matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
                     break
     return matches
