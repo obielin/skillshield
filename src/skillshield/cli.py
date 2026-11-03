@@ -150,7 +150,13 @@ def cmd_scan(args) -> int:
             print(json.dumps(report_to_sarif(report), indent=2))
         else:
             print(report.summary())
-        return 1 if report.critical_count > 0 else 0
+        # Same exit codes as a single-file scan: an unreadable file must not look like a pass
+        # (2), and a CRITICAL or HIGH file fails the scan (1).
+        if report.error_count > 0:
+            return 2
+        if any(r.risk_level in ("CRITICAL", "HIGH") for r in report.results):
+            return 1
+        return 0
 
     # single file
     elif Path(target).is_file():

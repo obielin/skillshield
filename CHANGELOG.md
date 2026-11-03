@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- `skillshield scan <folder>` now exits like a single-file scan: 1 when any file is CRITICAL or HIGH (before, only CRITICAL), and 2 when any file could not be read (before, it exited 0) (#83).
+
 ## [1.3.0]
 
 ### Upgrade notes

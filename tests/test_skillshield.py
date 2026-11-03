@@ -821,6 +821,28 @@ class TestUnreadableFiles:
         target.write_text(IDENTITY_SKILL)
         assert _run_cli(monkeypatch, "scan", str(target)) == 1
 
+    def test_folder_with_only_a_high_file_exits_1(self, tmp_path, monkeypatch):
+        (tmp_path / "a.md").write_text(CLEAN_SKILL)
+        (tmp_path / "b.md").write_text(IDENTITY_SKILL)
+        assert _run_cli(monkeypatch, "scan", str(tmp_path)) == 1
+
+    def test_folder_with_a_critical_file_exits_1(self, tmp_path, monkeypatch):
+        (tmp_path / "a.md").write_text(PROMPT_INJECTION_SKILL)
+        assert _run_cli(monkeypatch, "scan", str(tmp_path)) == 1
+
+    def test_clean_folder_exits_0(self, tmp_path, monkeypatch):
+        (tmp_path / "a.md").write_text(CLEAN_SKILL)
+        assert _run_cli(monkeypatch, "scan", str(tmp_path)) == 0
+
+    def test_folder_with_an_unreadable_file_exits_2(self, tmp_path, monkeypatch):
+        (tmp_path / "a.md").write_text(CLEAN_SKILL)
+        (tmp_path / "b.md").write_text("ok")
+        _make_unreadable(monkeypatch, "b.md")
+        assert _run_cli(monkeypatch, "scan", str(tmp_path)) == 2
+
+    def test_missing_path_exits_2(self, tmp_path, monkeypatch):
+        assert _run_cli(monkeypatch, "scan", str(tmp_path / "nope")) == 2
+
     def test_batch_report_keeps_errors_out_of_flagged(self, tmp_path, monkeypatch):
         (tmp_path / "a.md").write_text(CLEAN_SKILL)
         (tmp_path / "b.md").write_text("ok")
