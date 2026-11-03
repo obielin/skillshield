@@ -90,6 +90,65 @@ _EXFIL_PATTERNS = [
     r"socket\.(?:connect|send)\s*\(",
 ]
 
+_EXFIL_RE = re.compile("|".join(_EXFIL_PATTERNS), re.IGNORECASE | re.MULTILINE)
+
+# The whole environment, not one variable: `dict(os.environ)`, `os.environ.copy()`,
+# `JSON.stringify(process.env)`, `{...process.env}`. `os.environ.get("HOME")`,
+# `os.environ["HOME"]` and `process.env.HOME` name one variable and are not here.
+_WHOLE_ENVIRONMENT = re.compile(
+    r"\b(?:json\.dumps|str|repr|list|dict)\(\s*os\.environ\b"
+    r"|\bos\.environ\s*\.\s*(?:copy|items|values)\s*\(\s*\)"
+    r"|\*\*\s*os\.environ\b"
+    r"|\b(?:data|json|params|headers|body|payload|content)\s*=\s*os\.environ\b(?!\s*[\[.])"
+    r"|\bJSON\.stringify\(\s*process\.env\b(?!\s*[.\[])"
+    r"|\.\.\.\s*process\.env\b"
+    r"|\bObject\.(?:entries|keys|values|assign|fromEntries)\(\s*(?:\{\}\s*,\s*)?process\.env\b"
+    r"|\b(?:body|data|json|params|headers)\s*:\s*process\.env\b(?!\s*[.\[])",
+    re.IGNORECASE,
+)
+
+# A call that sends data over HTTP.
+_HTTP_CALL = re.compile(
+    r"\b(?:requests|httpx|aiohttp|urllib3|session|client|http|https|axios|got|ky|superagent)"
+    r"\s*\.\s*(?:post|put|patch|get|request|send|fetch)\s*\("
+    r"|\burllib\.request\.(?:urlopen|Request)\s*\("
+    r"|\b(?:urlopen|fetch|axios)\s*\("
+    r"|\bnavigator\.sendBeacon\s*\("
+    r"|\bXMLHttpRequest\b",
+    re.IGNORECASE,
+)
+
+# How many lines either side of the environment a call can sit: a request is often written
+# over several lines, or the environment is put in a variable first.
+_EXFIL_WINDOW = 6
+
+
+def _environment_to_http_matches(text: str) -> list[str]:
+    """Find code that sends the whole environment (API keys and all) over HTTP.
+
+    Each line is tested once for the environment and once for a call, and the calls near a
+    line are counted with a running total, so the time grows with the size of the text and
+    a skill cannot slow a scan by repeating either pattern.
+    """
+    lines = text.splitlines()
+    calls_up_to = [0]
+    for line in lines:
+        calls_up_to.append(calls_up_to[-1] + (1 if _HTTP_CALL.search(line) else 0))
+    matches: list[str] = []
+    for number, line in enumerate(lines):
+        if not _WHOLE_ENVIRONMENT.search(line):
+            continue
+        first = max(0, number - _EXFIL_WINDOW)
+        last = min(len(lines), number + _EXFIL_WINDOW + 1)
+        if calls_up_to[last] - calls_up_to[first]:
+            matches.append(line.strip()[:200])
+    return matches
+
+
+def _check_data_exfil(text: str) -> list[str]:
+    return [m.group(0) for m in _EXFIL_RE.finditer(text)] + _environment_to_http_matches(text)
+
+
 RULE_DATA_EXFIL = Rule(
     id="SG-002",
     name="Data Exfiltration",
@@ -97,13 +156,17 @@ RULE_DATA_EXFIL = Rule(
     description=(
         "The skill contains patterns consistent with data exfiltration -- "
         "sending user files, secrets, or environment variables to an external endpoint. "
+        "Code that reads the whole environment (dict(os.environ), os.environ.copy(), "
+        "JSON.stringify(process.env)) next to an HTTP call is flagged, because the "
+        "environment usually holds API keys. "
         "Snyk's ToxicSkills study confirmed 76 malicious payloads across 3,984 skills."
     ),
     remediation=(
         "Legitimate skills do not make outbound requests with user data. "
-        "If network access is required, it must be scoped, documented, and user-consented."
+        "If network access is required, it must be scoped, documented, and user-consented. "
+        "Never send the whole environment; read only the variables the skill needs."
     ),
-    pattern=re.compile("|".join(_EXFIL_PATTERNS), re.IGNORECASE | re.MULTILINE),
+    check_fn=_check_data_exfil,
     tags=["exfiltration", "data-theft", "owasp-asi02"],
 )
 

