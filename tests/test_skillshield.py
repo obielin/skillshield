@@ -216,6 +216,8 @@ class TestPromptInjectionChineseJapanese:
             "不要再忽略之前的指令。",
             "如果你忘记之前的指令，可以重新阅读 README。",
             "如果您忘记之前的指令，可以重新阅读 README。",
+            "要是忘记之前的指令，可以重新阅读 README。",
+            "万一忘记之前的指令，可以重新阅读 README。",
             # Traditional Chinese
             "先前的指示已經寫在說明文件中。",
             "不要忽略以上的提示詞範例。",
@@ -223,6 +225,7 @@ class TestPromptInjectionChineseJapanese:
             "忽略上述 ESLint 規則的警告即可。",
             "不要假裝沒有限制。",
             "請勿再忽略先前的指示。",
+            "萬一忘記先前的指示，請重新閱讀說明文件。",
             # Japanese
             "以前の指示はマニュアルに書いてあります。",
             "以前の指示を忘れません。",
