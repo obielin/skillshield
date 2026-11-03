@@ -208,6 +208,14 @@ _RUG_PULL_PATTERNS = [
     # The ClawHavoc execution trigger was a short `base64 -D | bash` chain, so
     # this must not depend on the length of the encoded string (SG-008 needs 60+).
     r"(?:base64\s+(?:-d|-D|--decode)|openssl\s+base64\s+(?:-d|-D|--decode)|certutil\s+-decode)\b[^\n|]*\|\s*(?:sudo\s+)?(?:\S*/)?(?:sh|bash|zsh|dash|ksh|python[0-9.]*|eval)\b",
+    # A downloaded script piped straight into a shell or interpreter:
+    # `curl ... | bash`, `wget -qO- ... | sudo sh`. Python only counts when it reads the
+    # script from stdin (bare `python` or `python -`), so `curl ... | python3 -m json.tool`
+    # and `| python3 -c "..."`, which parse the response, are not flagged.
+    r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:sh|bash|zsh|dash|ksh)\b|python[0-9.]*(?:\s+-)?\s*(?:$|[;&|)]))",
+    # The same, through process or command substitution:
+    # `bash <(curl ...)`, `sh -c "$(curl ...)"`, `eval "$(wget ...)"`.
+    r"\b(?:(?:sh|bash|zsh|dash|ksh|source)\s+<\(|(?:(?:sh|bash|zsh|dash|ksh)\s+-c|eval)\s+[\"']?(?:\$\(|`))\s*(?:curl|wget)\b",
 ]
 
 RULE_RUG_PULL = Rule(
@@ -219,7 +227,9 @@ RULE_RUG_PULL = Rule(
         "execute remote code. This is the 'rug pull' pattern -- a skill that changes "
         "behaviour after install by fetching malicious payloads from remote URLs. "
         "It also catches data decoded from base64 and piped straight into a shell, "
-        "the execution trigger in the ClawHavoc campaign, whatever the string length."
+        "the execution trigger in the ClawHavoc campaign, whatever the string length. "
+        "A script fetched with curl or wget and piped into a shell (curl ... | bash) "
+        "is flagged as well, since the skill can run anything the server sends."
     ),
     remediation=(
         "Skills must be static and self-contained. Any self-modification or "
