@@ -238,10 +238,54 @@ def _looks_like_file(token: str) -> bool:
     return "." in token or "/" in token
 
 
-def _trim_stage(segment: str) -> str:
-    """Cut the Markdown or shell wrapper off a pipeline stage: `bash` in "`... | bash` to run"
-    or "(... | bash)" is just `bash`."""
-    return re.split(r"[`)]", segment, maxsplit=1)[0].lstrip("({[` \t")
+def _stage_words(segment: str) -> list[str]:
+    """Split a pipeline stage into words, reading quotes as a shell does.
+
+    The words end where the command ends: at a `#` comment, or at a closing backtick or
+    parenthesis that was opened before this stage, as in "`curl ... | bash` to run" or
+    "(curl ... | bash)". Quoted text, and a `$(...)` opened inside the stage, stay in their
+    word, so `bash --rcfile "$(printf x)" script.sh` keeps its script file.
+    """
+    segment = segment.lstrip("({[` \t")
+    words: list[str] = []
+    word: list[str] = []
+    quote = ""
+    depth = 0
+    i, n = 0, len(segment)
+    while i < n:
+        ch = segment[i]
+        i += 1
+        if quote:
+            word.append(ch)
+            if ch == "\\" and quote == '"' and i < n:
+                word.append(segment[i])
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+            word.append(ch)
+        elif ch.isspace():
+            if word:
+                words.append("".join(word))
+                word = []
+        elif ch == "#" and not word:
+            break
+        elif ch == "(":
+            depth += 1
+            word.append(ch)
+        elif ch == ")":
+            if not depth:
+                break
+            depth -= 1
+            word.append(ch)
+        elif ch == "`" and i > 1 and not segment[i - 2].isspace():
+            break  # a backtick right after a word closes inline code opened before the stage
+        else:
+            word.append(ch)
+    if word:
+        words.append("".join(word))
+    return words
 
 
 def _shell_reads_stdin(arguments: list[str]) -> bool:
@@ -256,6 +300,8 @@ def _shell_reads_stdin(arguments: list[str]) -> bool:
             continue
         if not token.startswith("-"):
             return not _looks_like_file(token)
+        if token in ("--help", "--version"):
+            return False
         if token.startswith("--"):
             if token in ("--rcfile", "--init-file"):
                 j += 1
@@ -274,11 +320,7 @@ def _shell_reads_stdin(arguments: list[str]) -> bool:
 
 def _reads_script_from_stdin(segment: str) -> bool:
     """Whether this pipeline stage runs what it is fed as a script."""
-    tokens = []
-    for token in _trim_stage(segment).split():
-        if token.startswith("#"):  # a trailing shell comment: `| bash  # install`
-            break
-        tokens.append(token)
+    tokens = _stage_words(segment)
     i = 0
     if tokens and tokens[0].lower() == "sudo":
         i = 1
@@ -306,7 +348,7 @@ def _reads_script_from_stdin(segment: str) -> bool:
         if token.startswith("--"):
             continue
         for index, flag in enumerate(token[1:], start=1):
-            if flag in "cm":
+            if flag in "cmhV":  # -c and -m run something else; -h and -V print and exit
                 return False
             if flag in "WXQ":
                 # The rest of the token, or else the next one, is this option's argument.
@@ -419,7 +461,7 @@ def _pipe_to_interpreter_matches(text: str) -> list[str]:
             download = download[fetcher.start() :] if fetcher else download
             for end in range(first + 1, len(stages)):
                 if _reads_script_from_stdin(stages[end][0]):
-                    rest = (_trim_stage(s) for s, _ in stages[first + 1 : end + 1])
+                    rest = (" ".join(_stage_words(s)) for s, _ in stages[first + 1 : end + 1])
                     matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
                     break
     return matches

@@ -391,10 +391,30 @@ class TestRugPullRule:
         assert RULE_RUG_PULL.match(f"(curl -s {url} | bash -c 'echo ok')") == []
         assert RULE_RUG_PULL.match(f"curl -s {url} | python3 parse.py # parse it") == []
 
+    def test_quoted_and_embedded_arguments_stay_in_their_word(self):
+        url = "https://example.com/i.sh"
+        # The ")" closes a $(...) opened inside the stage, so script.sh is still a script file.
+        assert RULE_RUG_PULL.match(f'curl -s {url} | bash --rcfile "$(printf x)" script.sh') == []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash --rcfile '#x' script.sh") == []
+        # A "#" inside quotes is not a comment, so -s after it still keeps stdin.
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash -o '#x' -s") != []
+
+    def test_python_and_shell_options_that_print_and_exit_are_not_flagged(self):
+        url = "https://example.com/api"
+        for option in ("-h", "-V", "--help", "--version", "-uV"):
+            assert RULE_RUG_PULL.match(f"curl -s {url} | python3 {option}") == [], option
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash --version") == []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | python3 -u") != []
+
     def test_pipe_scan_stays_fast_on_hostile_input(self):
         import time
 
         hostile = [
+            "curl x | bash (" * 50_000,
+            "curl x | bash `" * 50_000,
+            "curl x | bash " + "'" * 200_000,
+            "curl x | bash " + "# " * 200_000,
+            "curl x | bash " + "(" * 200_000,
             "curl " * 100_000,
             "curl x | " * 100_000,
             "\n" * 100_000,
