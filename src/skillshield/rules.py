@@ -229,6 +229,21 @@ _PYTHON = re.compile(r"python[0-9.]*")
 _SUDO_OPTIONS_WITH_ARGUMENT = {"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t"}
 
 
+def _looks_like_file(token: str) -> bool:
+    """Whether an argument names a file (`report.sh`, `./run`) rather than being a plain word.
+
+    A skill is prose as well as shell, so `curl ... | bash to install` must still be flagged:
+    only an argument with a dot or a slash is taken as a script file that replaces stdin.
+    """
+    return "." in token or "/" in token
+
+
+def _trim_stage(segment: str) -> str:
+    """Cut the Markdown or shell wrapper off a pipeline stage: `bash` in "`... | bash` to run"
+    or "(... | bash)" is just `bash`."""
+    return re.split(r"[`)]", segment, maxsplit=1)[0].lstrip("({[` \t")
+
+
 def _shell_reads_stdin(arguments: list[str]) -> bool:
     """A shell runs stdin as a script unless it is given -c or a script file (-s keeps stdin)."""
     j = 0
@@ -238,9 +253,9 @@ def _shell_reads_stdin(arguments: list[str]) -> bool:
         if token == "-" or re.match(r"\d*[<>&]", token):
             return True
         if token == "--":
-            return j >= len(arguments)  # anything after it is a script file
+            continue
         if not token.startswith("-"):
-            return False  # a script file
+            return not _looks_like_file(token)
         if token.startswith("--"):
             if token in ("--rcfile", "--init-file"):
                 j += 1
@@ -259,7 +274,11 @@ def _shell_reads_stdin(arguments: list[str]) -> bool:
 
 def _reads_script_from_stdin(segment: str) -> bool:
     """Whether this pipeline stage runs what it is fed as a script."""
-    tokens = segment.split()
+    tokens = []
+    for token in _trim_stage(segment).split():
+        if token.startswith("#"):  # a trailing shell comment: `| bash  # install`
+            break
+        tokens.append(token)
     i = 0
     if tokens and tokens[0].lower() == "sudo":
         i = 1
@@ -280,8 +299,10 @@ def _reads_script_from_stdin(segment: str) -> bool:
         j += 1
         if token == "-" or re.match(r"\d*[<>&]", token):
             return True
-        if not token.startswith("-") or token in ("--help", "--version"):
+        if token in ("--help", "--version"):
             return False
+        if not token.startswith("-"):
+            return not _looks_like_file(token)
         if token.startswith("--"):
             continue
         for index, flag in enumerate(token[1:], start=1):
@@ -327,6 +348,13 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
                 quote = ""
             else:
                 quoted.append(ch)
+            i += 1
+            continue
+        if ch == "'" and i > 0 and line[i - 1].isalnum() and line[i + 1 : i + 2].isalpha():
+            # An apostrophe inside a word ("Here's", "don't") is prose, not a quote: left
+            # alone, it would open a quote that hides the rest of the line.
+            written.append(ch)
+            outside.append(ch)
             i += 1
             continue
         if ch in "'\"":
@@ -391,8 +419,8 @@ def _pipe_to_interpreter_matches(text: str) -> list[str]:
             download = download[fetcher.start() :] if fetcher else download
             for end in range(first + 1, len(stages)):
                 if _reads_script_from_stdin(stages[end][0]):
-                    parts = [download, *(s for s, _ in stages[first + 1 : end + 1])]
-                    matches.append(" | ".join(p.strip() for p in parts)[:200])
+                    rest = (_trim_stage(s) for s, _ in stages[first + 1 : end + 1])
+                    matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
                     break
     return matches
 
