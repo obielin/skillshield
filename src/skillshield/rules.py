@@ -208,15 +208,93 @@ _RUG_PULL_PATTERNS = [
     # The ClawHavoc execution trigger was a short `base64 -D | bash` chain, so
     # this must not depend on the length of the encoded string (SG-008 needs 60+).
     r"(?:base64\s+(?:-d|-D|--decode)|openssl\s+base64\s+(?:-d|-D|--decode)|certutil\s+-decode)\b[^\n|]*\|\s*(?:sudo\s+)?(?:\S*/)?(?:sh|bash|zsh|dash|ksh|python[0-9.]*|eval)\b",
-    # A downloaded script piped straight into a shell or interpreter:
-    # `curl ... | bash`, `wget -qO- ... | sudo sh`. Python only counts when it reads the
-    # script from stdin (bare `python` or `python -`), so `curl ... | python3 -m json.tool`
-    # and `| python3 -c "..."`, which parse the response, are not flagged.
-    r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:sh|bash|zsh|dash|ksh)\b|python[0-9.]*(?:\s+-)?\s*(?:$|[;&|)]))",
-    # The same, through process or command substitution:
+    # A download run through process or command substitution:
     # `bash <(curl ...)`, `sh -c "$(curl ...)"`, `eval "$(wget ...)"`.
+    # (`curl ... | bash` is in _pipe_to_interpreter_matches, which is not a regex.)
     r"\b(?:(?:sh|bash|zsh|dash|ksh|source)\s+<\(|(?:(?:sh|bash|zsh|dash|ksh)\s+-c|eval)\s+[\"']?(?:\$\(|`))\s*(?:curl|wget)\b",
 ]
+
+_RUG_PULL_RE = re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTILINE)
+
+# `curl ... | bash` is found by walking the text once rather than with a regex: a regex
+# that looks for a pipe after each `curl` rescans the rest of the line every time, and a
+# line of 100,000 `curl` words would stall a scan. Here every character is read a fixed
+# number of times.
+_FETCHER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
+_LINE_CONTINUATION = re.compile(r"\\\r?\n[ \t]*")
+_COMMAND_SEPARATORS = re.compile(r";|&&|\|\|")
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+_PYTHON = re.compile(r"python[0-9.]*")
+_SUDO_OPTIONS_WITH_ARGUMENT = {"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t"}
+
+
+def _reads_script_from_stdin(segment: str) -> bool:
+    """Whether this pipeline stage runs what it is fed as a script."""
+    tokens = segment.split()
+    i = 0
+    if tokens and tokens[0].lower() == "sudo":
+        i = 1
+        while i < len(tokens) and tokens[i].startswith("-"):
+            i += 2 if tokens[i] in _SUDO_OPTIONS_WITH_ARGUMENT else 1
+    if i >= len(tokens):
+        return False
+    name = tokens[i].rsplit("/", 1)[-1].lower()
+    if name in _SHELLS:
+        return True
+    if not _PYTHON.fullmatch(name):
+        return False
+    # Python runs stdin as a script unless it is given -c, -m or a script file, so options
+    # such as -u or -X dev do not stop it. `curl ... | python3 -m json.tool` only parses.
+    j = i + 1
+    while j < len(tokens):
+        token = tokens[j]
+        j += 1
+        if token == "-" or re.match(r"\d*[<>&]", token):
+            return True
+        if not token.startswith("-") or token in ("--help", "--version"):
+            return False
+        if token.startswith("--"):
+            continue
+        for index, flag in enumerate(token[1:], start=1):
+            if flag in "cm":
+                return False
+            if flag in "WXQ":
+                # The rest of the token, or else the next one, is this option's argument.
+                if index == len(token) - 1:
+                    j += 1
+                break
+    return True
+
+
+def _pipe_to_interpreter_matches(text: str) -> list[str]:
+    """Find `curl ... | bash`: a download piped into a shell or into python reading stdin."""
+    matches: list[str] = []
+    # A backslash at the end of a line continues the command on the next one.
+    text = _LINE_CONTINUATION.sub(" ", text)
+    for line in text.splitlines():
+        if "|" not in line:
+            continue
+        # Commands end at ; && || so a download followed by a separate command that is
+        # piped into a shell is not a match.
+        for command in _COMMAND_SEPARATORS.split(line):
+            stages = command.split("|")
+            first_fetch = next((n for n, s in enumerate(stages) if _FETCHER.search(s)), None)
+            if first_fetch is None:
+                continue
+            # The snippet starts at the download command, not at the words before it.
+            download = stages[first_fetch]
+            download = download[_FETCHER.search(download).start() :]
+            for end in range(first_fetch + 1, len(stages)):
+                if _reads_script_from_stdin(stages[end]):
+                    parts = [download, *stages[first_fetch + 1 : end + 1]]
+                    matches.append(" | ".join(p.strip() for p in parts)[:200])
+                    break
+    return matches
+
+
+def _check_rug_pull(text: str) -> list[str]:
+    return [m.group(0) for m in _RUG_PULL_RE.finditer(text)] + _pipe_to_interpreter_matches(text)
+
 
 RULE_RUG_PULL = Rule(
     id="SG-006",
@@ -235,7 +313,7 @@ RULE_RUG_PULL = Rule(
         "Skills must be static and self-contained. Any self-modification or "
         "remote code execution is grounds for immediate removal."
     ),
-    pattern=re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTILINE),
+    check_fn=_check_rug_pull,
     tags=["rug-pull", "rce", "supply-chain", "clawhavoc"],
 )
 
