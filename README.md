@@ -6,7 +6,7 @@ SkillShield is a first line of defence, not a complete one: see [Limitations](#l
 
 **Contributors welcome.** Pick an issue and comment `/assign` to claim it: [good first issues](https://github.com/obielin/skillshield/contribute) · [help wanted](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) · [detection gaps](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3Adetection-gap) · [roadmap](ROADMAP.md)
 
-[![Tests](https://img.shields.io/badge/Tests-162%20passing-brightgreen?style=flat-square)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-291%20passing-brightgreen?style=flat-square)](tests/)
 [![PyPI](https://img.shields.io/pypi/v/skillshield?style=flat-square)](https://pypi.org/project/skillshield/)
 [![Dependencies](https://img.shields.io/badge/Dependencies-zero-brightgreen?style=flat-square)](pyproject.toml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square)](pyproject.toml)
@@ -14,6 +14,21 @@ SkillShield is a first line of defence, not a complete one: see [Limitations](#l
 [![Good first issues](https://img.shields.io/github/issues/obielin/skillshield/good%20first%20issue?style=flat-square&label=good%20first%20issues)](https://github.com/obielin/skillshield/contribute)
 [![Help wanted](https://img.shields.io/github/issues/obielin/skillshield/help%20wanted?style=flat-square&label=help%20wanted)](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
 [![LinkedIn](https://img.shields.io/badge/-Linda_Oraegbunam-blue?logo=linkedin&style=flat-square)](https://www.linkedin.com/in/linda-oraegbunam/)
+
+## See it in action
+
+```bash
+pip install skillshield
+skillshield scan skills/
+```
+
+<p align="center"><img src="https://raw.githubusercontent.com/obielin/skillshield/main/docs/images/terminal-scan.png" alt="skillshield scan skills/ reports one of two skills as CRITICAL: SG-001 prompt injection and SG-006 base64 piped into a shell. The command exits 1." width="640"></p>
+
+In a pull request, the [GitHub Action](#github-action) flags the line itself:
+
+<p align="center"><img src="https://raw.githubusercontent.com/obielin/skillshield/main/docs/images/flagged-pull-request.png" alt="A pull request adding a skill. GitHub shows a SkillShield prompt injection alert under the line telling the agent to ignore all previous instructions, and the SkillShield check has failed." width="640"></p>
+
+Try it on a live pull request in [skillshield-demo](https://github.com/obielin/skillshield-demo/pull/1).
 
 ---
 
@@ -48,7 +63,7 @@ Rule IDs (`SG-001` to `SG-012`) have not changed. SARIF output now names the too
 
 The `skillguard` package on PyPI, and `skill-guard`, are other people's projects, not this one.
 
-- Version 1.2.0
+- Version 1.3.0
 - Python 3.10 or later
 - No runtime dependencies
 - MIT licence
