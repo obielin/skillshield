@@ -215,6 +215,7 @@ class TestPromptInjectionChineseJapanese:
             "跳过以上步骤的设定，直接运行测试。",
             "不要再忽略之前的指令。",
             "如果你忘记之前的指令，可以重新阅读 README。",
+            "如果您忘记之前的指令，可以重新阅读 README。",
             # Traditional Chinese
             "先前的指示已經寫在說明文件中。",
             "不要忽略以上的提示詞範例。",
