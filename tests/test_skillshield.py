@@ -840,6 +840,12 @@ class TestUnreadableFiles:
         _make_unreadable(monkeypatch, "b.md")
         assert _run_cli(monkeypatch, "scan", str(tmp_path)) == 2
 
+    def test_folder_with_unreadable_and_high_file_exits_2(self, tmp_path, monkeypatch):
+        (tmp_path / "a.md").write_text(IDENTITY_SKILL)
+        (tmp_path / "b.md").write_text("ok")
+        _make_unreadable(monkeypatch, "b.md")
+        assert _run_cli(monkeypatch, "scan", str(tmp_path)) == 2
+
     def test_missing_path_exits_2(self, tmp_path, monkeypatch):
         assert _run_cli(monkeypatch, "scan", str(tmp_path / "nope")) == 2
 
