@@ -117,8 +117,15 @@ def _risk_level(score: float, findings: list[Finding]) -> str:
 
 
 def _find_line_numbers(text: str, snippet: str) -> list[int]:
-    """Return line numbers where a snippet appears in text."""
+    """Return line numbers where a snippet appears in text.
+
+    A snippet that is cut short (it ends in "...") or that spans lines is not in any one line
+    whole, so the lines holding its first 40 characters are used instead.
+    """
     lines = text.splitlines()
+    whole = [i + 1 for i, line in enumerate(lines) if snippet in line]
+    if whole:
+        return whole
     return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]
 
 

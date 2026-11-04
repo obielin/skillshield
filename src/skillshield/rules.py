@@ -100,10 +100,10 @@ _WHOLE_ENVIRONMENT = re.compile(
     r"|\bos\.environ\s*\.\s*(?:copy|items|values)\s*\(\s*\)"
     r"|\*\*\s*os\.environ\b"
     r"|\b(?:data|json|params|headers|body|payload|content)\s*=\s*os\.environ\b(?!\s*[\[.])"
-    r"|\bJSON\.stringify\(\s*process\.env\b(?!\s*[.\[])"
-    r"|\.\.\.\s*process\.env\b(?!\s*[.\[])"
-    r"|\bObject\.(?:entries|keys|values|assign|fromEntries)\(\s*(?:\{\}\s*,\s*)?process\.env\b(?!\s*[.\[])"
-    r"|\b(?:body|data|json|params|headers)\s*:\s*process\.env\b(?!\s*[.\[])",
+    r"|\bJSON\.stringify\(\s*process\.env\b(?!\s*(?:[.\[]|\?\.))"
+    r"|\.\.\.\s*process\.env\b(?!\s*(?:[.\[]|\?\.))"
+    r"|\bObject\.(?:entries|keys|values|assign|fromEntries)\(\s*(?:\{\}\s*,\s*)?process\.env\b(?!\s*(?:[.\[]|\?\.))"
+    r"|\b(?:body|data|json|params|headers)\s*:\s*process\.env\b(?!\s*(?:[.\[]|\?\.))",
     re.IGNORECASE,
 )
 
