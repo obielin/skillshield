@@ -134,9 +134,13 @@ _PROMPT_INJECTION_PATTERNS_ZH = [
 ]
 
 # Japanese (#66). A negated verb right after the match ("無視しないで",
-# "変更しません", "無効にしないで", "忘れません") is not an override.
+# "変更しません", "無効にしないで", "忘れません") is not an override, nor is a polite
+# past-tense statement ("忘れました", "無視しました"). The plain past stays flagged:
+# "無視した上で…" is still an instruction.
 _JA_GAP = r"[^。！？!?\n]{0,10}?"
-_JA_NOT = r"(?!(?:に|化)?(?:しな|せず|するな|しては|しません|させな)|ない|ず|ません)"
+_JA_NOT = (
+    r"(?!(?:に|化)?(?:しな|せず|するな|しては|しません|しました|させな)|ない|ず|ません|ました)"
+)
 
 _PROMPT_INJECTION_PATTERNS_JA = [
     # 以前の指示をすべて無視してください / 上記の指示は忘れて
@@ -171,10 +175,12 @@ _CJK_CHAR = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]")
 
 
 def _check_prompt_injection(text: str) -> list[str]:
-    found = [m.group(0) for m in _PROMPT_INJECTION_RE.finditer(text)]
+    found = list(_PROMPT_INJECTION_RE.finditer(text))
     if _CJK_CHAR.search(text):
-        found += [m.group(0) for m in _PROMPT_INJECTION_CJK_RE.finditer(text)]
-    return found
+        found += _PROMPT_INJECTION_CJK_RE.finditer(text)
+        # in source order, so the scanner reports the first match's line
+        found.sort(key=lambda m: m.start())
+    return [m.group(0) for m in found]
 
 
 RULE_PROMPT_INJECTION = Rule(
