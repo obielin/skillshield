@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 import time
 from pathlib import Path
@@ -123,6 +124,10 @@ def _risk_level(score: float, findings: list[Finding]) -> str:
     return level
 
 
+# "[line 3: 12 invisible Unicode tag characters, ...]", as the SG-008 tag match writes it.
+_TAG_SNIPPET_LINE_RE = re.compile(r"\[line (\d+): \d+ invisible Unicode tag")
+
+
 def _find_line_numbers(text: str, snippet: str) -> list[int]:
     """Return line numbers where a snippet appears in text."""
     lines = text.splitlines()
@@ -202,6 +207,10 @@ class SkillScanner:
                 found_hidden = []
             if snippets:
                 line_numbers = _find_line_numbers(text, snippets[0])
+                # An SG-008 tag match is a generated snippet that names its own line, so it is
+                # not in the text to be searched for.
+                tag_lines = [int(m[1]) for m in map(_TAG_SNIPPET_LINE_RE.search, snippets) if m]
+                line_numbers = sorted(set(line_numbers + tag_lines))
             elif found_hidden:
                 line_numbers = hidden_lines
             else:

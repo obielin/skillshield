@@ -267,16 +267,39 @@ _BIDI_CONTROL_RE = re.compile("[\u202a-\u202e\u2066-\u2069]")
 # a model can read them: "ASCII smuggling". A skill can look like one sentence and carry a
 # full hidden instruction.
 _TAG_RUN_RE = re.compile("[\U000e0000-\U000e007f]+")
-# The one real use is the emoji flag of England, Scotland or Wales: U+1F3F4, then a few
-# lowercase letters or digits as tags, then U+E007F. Only a run of exactly that shape, right
-# after U+1F3F4, is let through, so a flag in front of a hidden sentence does not hide it.
+# The one real use is the emoji flag of England, Scotland or Wales: U+1F3F4, then the tags for
+# "gbeng", "gbsct" or "gbwls", then U+E007F. Only one of those three runs, right after U+1F3F4, is
+# let through, so a flag in front of a hidden sentence does not hide it, and neither does a run
+# that only looks like a flag (tags for "abc" and the cancel tag, say).
 _BLACK_FLAG = "\U0001f3f4"
-_FLAG_TAGS_RE = re.compile("[\U000e0061-\U000e007a\U000e0030-\U000e0039]{2,7}\U000e007f")
+_FLAG_CODES = ("gbeng", "gbsct", "gbwls")
+_FLAG_TAGS_RE = re.compile(
+    "(?:"
+    + "|".join("".join(chr(0xE0000 + ord(c)) for c in code) for code in _FLAG_CODES)
+    + ")\U000e007f"
+)
 
 
 def _decode_tags(run: str) -> str:
     """The ASCII that a run of tag characters mirrors."""
     return "".join(chr(ord(c) - 0xE0000) for c in run if 0xE0020 <= ord(c) <= 0xE007E)
+
+
+def _join_decoded(text: str, runs) -> str:
+    """The decoded runs, in order. Two runs with only visible, non-space characters between them
+    are one word split by those characters, so they are joined as they are ("Ig" + "x" + "nore" is
+    "Ignore"); whitespace or a line break between them keeps a space."""
+    parts: list[str] = []
+    prev_end = 0
+    for m in runs:
+        decoded = _decode_tags(m.group(0))
+        if not decoded:
+            continue
+        if parts and any(c.isspace() for c in text[prev_end : m.start()]):
+            parts.append(" ")
+        parts.append(decoded)
+        prev_end = m.end()
+    return "".join(parts)
 
 
 def hidden_tag_text(text: str) -> str:
@@ -285,7 +308,7 @@ def hidden_tag_text(text: str) -> str:
     The scanner reads this with every rule, so a hidden "ignore all previous instructions" is
     found as the instruction it is.
     """
-    return " ".join(d for d in (_decode_tags(m.group(0)) for m in _TAG_RUN_RE.finditer(text)) if d)
+    return _join_decoded(text, _TAG_RUN_RE.finditer(text))
 
 
 def tag_line_numbers(text: str) -> list[int]:
@@ -307,7 +330,7 @@ def _hidden_tag_matches(text: str) -> list[str]:
         if not runs:
             continue
         count = sum(len(m[0]) for m in runs)
-        hidden = " ".join(d for d in (_decode_tags(m[0]) for m in runs) if d)
+        hidden = _join_decoded(line, runs)
         visible = _TAG_RUN_RE.sub("", line).strip()[:60]
         matches.append(
             f'{visible + " " if visible else ""}[line {lineno}: {count} invisible Unicode tag '
