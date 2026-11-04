@@ -101,6 +101,8 @@ _WHOLE_ENVIRONMENT = re.compile(
     r"|\*\*\s*os\.environ\b"
     r"|\b(?:data|json|params|headers|body|payload|content)\s*=\s*os\.environ\b(?!\s*[\[.])"
     r"|\bJSON\.stringify\(\s*process\.env\b(?!\s*(?:[.\[]|\?\.))"
+    # An optional-chain test first, then the whole environment: `process.env?.HOME && process.env`.
+    r"|\bprocess\.env\s*\?\.\s*[A-Za-z_]\w*\s*(?:&&|\|\||\?\?)\s*process\.env\b(?!\s*(?:[.\[]|\?\.))"
     r"|\.\.\.\s*process\.env\b(?!\s*(?:[.\[]|\?\.))"
     r"|\bObject\.(?:entries|keys|values|assign|fromEntries)\(\s*(?:\{\}\s*,\s*)?process\.env\b(?!\s*(?:[.\[]|\?\.))"
     r"|\b(?:body|data|json|params|headers)\s*:\s*process\.env\b(?!\s*(?:[.\[]|\?\.))",

@@ -246,6 +246,45 @@ class TestDataExfilRule:
             assert RULE_DATA_EXFIL.match(text) == [], text
         assert RULE_DATA_EXFIL.match("axios.post(url, { ...process.env })") != []
 
+    @pytest.mark.parametrize("join", ["&&", "||", "??"])
+    def test_an_optional_chain_test_before_the_whole_environment_is_flagged(self, join):
+        text = f"fetch(url, {{body: JSON.stringify(process.env?.HOME {join} process.env)}})"
+        assert RULE_DATA_EXFIL.match(text) != []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "fetch(url, {body: JSON.stringify(process.env?.HOME)})",
+            "fetch(url, {body: JSON.stringify(process.env?.HOME && process.env.PATH)})",
+            "fetch(url, {body: JSON.stringify(process.env?.HOME && process.env?.PATH)})",
+            "fetch(url, {body: JSON.stringify(process.env?.HOME || process.env['PATH'])})",
+        ],
+    )
+    def test_an_optional_chain_test_with_single_variables_is_not_flagged(self, text):
+        assert RULE_DATA_EXFIL.match(text) == []
+
+    def test_every_matched_snippet_is_located(self):
+        text = (
+            "requests.post(url, data=dict(os.environ)) # first\n"
+            "print('between')\n"
+            "requests.post(url, data=dict(os.environ)) # second"
+        )
+        found = SkillScanner().scan_text(text, name="SKILL.md").findings
+        sg002 = [f for f in found if f.rule_id == "SG-002"]
+        assert len(sg002[0].snippets) == 2
+        assert sg002[0].line_numbers == [1, 3]
+
+    def test_locating_the_snippets_stays_fast_on_a_text_that_matches_everywhere(self):
+        # Every line matches. Each located snippet reads every line, so without a limit on how many
+        # are located the work would grow with the product of the two.
+        text = "\n".join(f"requests.post(url, data=dict(os.environ)) # {n}" for n in range(20_000))
+        start = time.perf_counter()
+        found = SkillScanner().scan_text(text, name="SKILL.md").findings
+        elapsed = time.perf_counter() - start
+        sg002 = [f for f in found if f.rule_id == "SG-002"]
+        assert sg002 and len(sg002[0].snippets) == 20_000 and sg002[0].line_numbers
+        assert elapsed < 4.0, elapsed
+
     def test_the_line_is_found_when_the_snippet_starts_like_earlier_lines(self):
         p = "x" * 100
         text = (

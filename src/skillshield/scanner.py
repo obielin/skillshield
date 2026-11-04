@@ -117,16 +117,34 @@ def _risk_level(score: float, findings: list[Finding]) -> str:
 
 
 def _find_line_numbers(text: str, snippet: str) -> list[int]:
-    """Return line numbers where a snippet appears in text.
+    """Return line numbers where a snippet appears in text."""
+    return _locate(text.splitlines(), snippet)
+
+
+def _locate(lines: list[str], snippet: str) -> list[int]:
+    """The lines that carry a snippet.
 
     A snippet that is cut short (it ends in "...") or that spans lines is not in any one line
     whole, so the lines holding its first 40 characters are used instead.
     """
-    lines = text.splitlines()
     whole = [i + 1 for i, line in enumerate(lines) if snippet in line]
     if whole:
         return whole
     return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]
+
+
+# Locating a snippet reads every line, so only the first snippets of a finding are located:
+# a skill that matches thousands of times cannot slow a scan down by the number of its matches.
+_MAX_SNIPPETS_LOCATED = 50
+
+
+def _find_all_line_numbers(text: str, snippets: list[str]) -> list[int]:
+    """The lines of every snippet of a finding, once each, in order."""
+    lines = text.splitlines()
+    found: set[int] = set()
+    for snippet in snippets[:_MAX_SNIPPETS_LOCATED]:
+        found.update(_locate(lines, snippet))
+    return sorted(found)
 
 
 class SkillScanner:
@@ -192,7 +210,7 @@ class SkillScanner:
             except Exception:
                 snippets = []
             if snippets:
-                line_numbers = _find_line_numbers(text, snippets[0])
+                line_numbers = _find_all_line_numbers(text, snippets)
                 findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
 
         score = _compute_risk_score(findings)
