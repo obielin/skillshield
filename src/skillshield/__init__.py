@@ -33,7 +33,7 @@ from skillshield.models import BatchScanReport, Finding, SkillScanResult
 from skillshield.rules import ALL_RULES, Rule, Severity
 from skillshield.scanner import SkillScanner
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 __author__ = "Linda Oraegbunam"
 __all__ = [
     "SkillScanner",

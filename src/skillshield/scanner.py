@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import time
 from pathlib import Path
 from typing import Callable
 
 from skillshield.models import BatchScanReport, Finding, SkillScanResult
-from skillshield.rules import ALL_RULES, Rule, Severity
+from skillshield.rules import ALL_RULES, RULE_COMPILED_PYTHON, Rule, Severity
 
 # Severity weights for risk score calculation
 _SEVERITY_WEIGHTS = {
@@ -44,6 +45,48 @@ SKILL_EXTENSIONS = {
     ".xml",
     ".html",
 }
+
+# Compiled Python that Python runs directly but a text scanner cannot read.
+COMPILED_PYTHON_EXTENSIONS = {".pyc", ".pyo"}
+
+# Directories that hold tooling or dependencies, never skills the repo ships.
+SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache"}
+
+_LOCAL_ENV_NAMES = {"venv", ".venv"}
+
+
+def _dir_is_skipped(directory: Path) -> bool:
+    """Whether a directory is tooling rather than skill content.
+
+    A venv name alone proves nothing: a skill can ship its own .venv/ to hide
+    bytecode from the scanner. Only a directory that carries pyvenv.cfg next
+    to its interpreter is a real local environment; anything else is scanned.
+    """
+    name = directory.name
+    if name not in SKIP_DIRS:
+        return False
+    if name in _LOCAL_ENV_NAMES and not (directory / "pyvenv.cfg").is_file():
+        return False
+    return True
+
+
+def compiled_source_path(path: Path) -> Path:
+    """The source file a .pyc or .pyo was compiled from.
+
+    A file in __pycache__ keeps its source one level up with the interpreter
+    tag in the name (tool.cpython-310.pyc -> tool.py), so the naming rule
+    comes from importlib instead of a swapped suffix.
+    """
+    try:
+        return Path(importlib.util.source_from_cache(str(path)))
+    except (ValueError, NotImplementedError):
+        # .pyo in __pycache__, or a name source_from_cache will not take.
+        # Keep the interpreter tag out of the guessed source name:
+        # tool.cpython-310.pyo -> tool.py, not tool.cpython-310.py.
+        if path.parent.name == "__pycache__":
+            module = path.stem.split(".", 1)[0]
+            return path.parent.parent / f"{module}.py"
+        return path.with_suffix(".py")
 
 
 def _compute_risk_score(findings: list[Finding]) -> float:
@@ -170,6 +213,8 @@ class SkillScanner:
             SkillScanResult
         """
         p = Path(path)
+        if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS:
+            return self._scan_compiled_file(p)
         self._log(f"  Scanning {p.name}...")
         try:
             text = p.read_text(encoding=encoding, errors="replace")
@@ -182,6 +227,48 @@ class SkillScanner:
                 error=str(e),
             )
         return self.scan_text(text, name=p.name)
+
+    def _scan_compiled_file(self, path: Path, base: Path | None = None) -> SkillScanResult:
+        """Report a compiled Python file as a HIGH finding.
+
+        Bytecode is not reviewable and Python runs it directly, so a skill that
+        ships a .pyc/.pyo is treated as a payload carrier rather than skipped.
+        """
+        name = path.relative_to(base).as_posix() if base is not None else path.name
+        self._log(f"  Scanning {name} (compiled)...")
+        try:
+            with path.open("rb") as compiled:
+                compiled.read(1)
+        except OSError as exc:
+            # An unreadable path is an error, not a finding: CI reserves exit
+            # code 2 for a file it could not read at all.
+            return SkillScanResult(
+                skill_name=name,
+                findings=[],
+                risk_score=0.0,
+                risk_level="ERROR",
+                error=str(exc),
+            )
+        snippet = name
+        source = compiled_source_path(path)
+        if not source.is_file():
+            snippet = f"{name} (no matching {source.name}; ship the source instead)"
+        findings: list[Finding] = []
+        configured_rule = next(
+            (rule for rule in self.rules if rule.id == RULE_COMPILED_PYTHON.id), None
+        )
+        if configured_rule is not None and not self._below_min_severity(configured_rule.severity):
+            findings.append(Finding(rule=configured_rule, snippets=[snippet], line_numbers=[1]))
+        score = _compute_risk_score(findings)
+        return SkillScanResult(
+            skill_name=name,
+            findings=findings,
+            risk_score=score,
+            risk_level=_risk_level(score, findings),
+            scan_time_ms=0.0,
+            line_count=0,
+            char_count=0,
+        )
 
     def scan_directory(
         self,
@@ -205,19 +292,43 @@ class SkillScanner:
         exts = extensions or SKILL_EXTENSIONS
         base = Path(directory)
         glob = base.rglob("*") if recursive else base.glob("*")
-        paths = [p for p in sorted(glob) if p.is_file() and p.suffix.lower() in exts]
+        all_files = [p for p in sorted(glob) if p.is_file()]
+        paths = [p for p in all_files if p.suffix.lower() in exts]
+        # A compiled file asked for through extensions already reaches
+        # scan_file, which dispatches to the compiled check; collecting it
+        # here as well would report the same file twice. Compiled Python is
+        # never filtered by directory name: a submitted skill can hide
+        # bytecode inside any directory, including a real local environment.
+        compiled = [
+            p
+            for p in all_files
+            if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS and p.suffix.lower() not in exts
+        ]
 
-        self._log(f"  Found {len(paths)} skill files in {directory}")
+        selected = set(paths) | set(compiled)
+        unscanned = [
+            path.relative_to(base).as_posix() for path in all_files if path not in selected
+        ]
+        self._log(
+            f"  Found {len(paths)} skill files and {len(compiled)} compiled files in {directory}"
+        )
         results: list[SkillScanResult] = []
+        total = len(paths) + len(compiled)
 
         for i, path in enumerate(paths):
             name = path.relative_to(base).as_posix()
-            on_progress and on_progress(name, i + 1, len(paths))
+            on_progress and on_progress(name, i + 1, total)
             result = self.scan_file(path)
             result.skill_name = name
             results.append(result)
 
-        return BatchScanReport(results=results)
+        for i, path in enumerate(compiled, start=len(paths)):
+            name = path.relative_to(base).as_posix()
+            on_progress and on_progress(name, i + 1, total)
+            results.append(self._scan_compiled_file(path, base))
+
+        metadata = {"unscanned": unscanned} if unscanned else {}
+        return BatchScanReport(results=results, metadata=metadata)
 
     def scan_texts(
         self,

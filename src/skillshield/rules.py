@@ -1010,6 +1010,30 @@ RULE_BRAND_NAME_IMPERSONATION = Rule(
 )
 
 
+# ── SG-014: Compiled Python Payload ───────────────────────────
+
+# A .pyc/.pyo in a skill is bytecode with no reviewable source. Python imports
+# and runs it directly, so a payload can hide in an otherwise harmless skill.
+RULE_COMPILED_PYTHON = Rule(
+    id="SG-014",
+    name="Compiled Python Payload",
+    severity=Severity.HIGH,
+    description=(
+        "The skill ships compiled Python bytecode (.pyc or .pyo) instead of "
+        "readable source. Bytecode is not reviewable, and Python imports or runs "
+        "it directly, so a payload can hide behind a harmless-looking skill that "
+        "claims to call a .py script. Trail of Bits used this to slip an "
+        "environment-variable stealer past scanners that only read .py files."
+    ),
+    remediation=(
+        "Ship the .py source and remove the .pyc/.pyo. If the bytecode must stay, "
+        "include the matching source and explain why; never run a compiled file "
+        "whose source you cannot read."
+    ),
+    tags=["compiled-python", "bytecode", "payload", "supply-chain"],
+)
+
+
 # ── All rules ──────────────────────────────────────────────────
 
 ALL_RULES: list[Rule] = [
@@ -1027,4 +1051,5 @@ ALL_RULES: list[Rule] = [
     RULE_SUSPICIOUS_URLS,
     RULE_PACKAGE_REGISTRY,
     RULE_BRAND_NAME_IMPERSONATION,
+    RULE_COMPILED_PYTHON,
 ]

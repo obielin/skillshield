@@ -6,7 +6,7 @@ SkillShield is a first line of defence, not a complete one: see [Limitations](#l
 
 **Contributors welcome.** Pick an issue and comment `/assign` to claim it: [good first issues](https://github.com/obielin/skillshield/contribute) · [help wanted](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) · [detection gaps](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3Adetection-gap) · [roadmap](ROADMAP.md)
 
-[![Tests](https://img.shields.io/badge/Tests-162%20passing-brightgreen?style=flat-square)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-291%20passing-brightgreen?style=flat-square)](tests/)
 [![PyPI](https://img.shields.io/pypi/v/skillshield?style=flat-square)](https://pypi.org/project/skillshield/)
 [![Dependencies](https://img.shields.io/badge/Dependencies-zero-brightgreen?style=flat-square)](pyproject.toml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square)](pyproject.toml)
@@ -14,6 +14,21 @@ SkillShield is a first line of defence, not a complete one: see [Limitations](#l
 [![Good first issues](https://img.shields.io/github/issues/obielin/skillshield/good%20first%20issue?style=flat-square&label=good%20first%20issues)](https://github.com/obielin/skillshield/contribute)
 [![Help wanted](https://img.shields.io/github/issues/obielin/skillshield/help%20wanted?style=flat-square&label=help%20wanted)](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
 [![LinkedIn](https://img.shields.io/badge/-Linda_Oraegbunam-blue?logo=linkedin&style=flat-square)](https://www.linkedin.com/in/linda-oraegbunam/)
+
+## See it in action
+
+```bash
+pip install skillshield
+skillshield scan skills/
+```
+
+<p align="center"><img src="https://raw.githubusercontent.com/obielin/skillshield/main/docs/images/terminal-scan.png" alt="skillshield scan skills/ reports one of two skills as CRITICAL: SG-001 prompt injection and SG-006 base64 piped into a shell. The command exits 1." width="640"></p>
+
+In a pull request, the [GitHub Action](#github-action) flags the line itself:
+
+<p align="center"><img src="https://raw.githubusercontent.com/obielin/skillshield/main/docs/images/flagged-pull-request.png" alt="A pull request adding a skill. GitHub shows a SkillShield prompt injection alert under the line telling the agent to ignore all previous instructions, and the SkillShield check has failed." width="640"></p>
+
+Try it on a live pull request in [skillshield-demo](https://github.com/obielin/skillshield-demo/pull/1).
 
 ---
 
@@ -25,7 +40,7 @@ An agent skill is a file of instructions or code that an AI agent loads and foll
 - Snyk's ToxicSkills study scanned 3,984 skills from ClawHub and skills.sh. 534 skills (13.4%) had at least one critical issue. 1,467 skills had at least one security issue. Snyk confirmed 76 malicious payloads. [[2]](#sources)
 - The OWASP Agentic Skills Top 10 lists Malicious Skills as AST01 and Supply Chain Compromise as AST02. [[3]](#sources)
 
-skillshield checks skill files for these patterns with 13 rules. It runs locally and needs no network access.
+skillshield checks skill files for these patterns with 15 rules. It runs locally and needs no network access.
 
 ---
 
@@ -48,7 +63,7 @@ Rule IDs (`SG-001` to `SG-012`) have not changed. SARIF output now names the too
 
 The `skillguard` package on PyPI, and `skill-guard`, are other people's projects, not this one.
 
-- Version 1.2.0
+- Version 1.3.0
 - Python 3.10 or later
 - No runtime dependencies
 - MIT licence
@@ -64,7 +79,7 @@ skillshield scan SKILL.md                  # scan one file
 skillshield scan ./skills/                 # scan a directory
 skillshield scan - < SKILL.md              # scan stdin
 skillshield check "some text to scan"      # scan text given on the command line
-skillshield rules                          # list the 13 rules
+skillshield rules                          # list the 15 rules
 skillshield --version
 ```
 
@@ -80,6 +95,8 @@ Options for `skillshield scan`:
 
 A directory scan reads every file with one of these extensions, in all subdirectories:
 `.md`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
+
+`.pyc` and `.pyo` files are always collected as well, wherever they sit, including `.git`, `.venv`, `node_modules` and `__pycache__`. They are not part of the extension list above, so passing `extensions` cannot switch the compiled-Python check off. Every other file the scan does not open is listed in `unscanned`.
 
 #### Example: a skill that triggers SG-011
 
@@ -224,11 +241,12 @@ The outputs in the comments come from scanning the sample `SKILL.md` above, and 
 | SG-011 | CRITICAL | Lethal Trifecta (Supply Chain Attack Pattern) | SG-001 prompt injection, a network reference (`http://`, `https://`, `requests`, `urllib`, `socket`, `curl`, `wget`) and file system access (`open(`, `os.listdir`, `os.walk`, `os.scandir`, `pathlib.Path`, `glob.glob`, `shutil`) all in the same text. It does not report line numbers. |
 | SG-012 | MEDIUM | Suspicious URL | URLs with a raw IP address, tunnel or request-capture services (ngrok, webhook.site, requestbin, pipedream), paste sites, URL shorteners, or the TLDs `.xyz`, `.tk`, `.ml`, `.ga`, `.cf`, `.gq` and `.top`. |
 | SG-013 | HIGH | Untrusted Package Registry | `pip`, `npm` or `yarn` pointed at a registry other than the official one -- `--index-url`, `--extra-index-url`, `-i`, `--registry`, `PIP_INDEX_URL`, `npm config set registry`, `yarn config set npmRegistryServer`, or a `pip.conf`, `.npmrc` or `.pypirc` line that sets an untrusted registry (`registry`, `@scope:registry`, `index-url`, `repository`). TestPyPI counts as untrusted: anyone can publish there. A later install then pulls the attacker's packages (dependency confusion, OWASP AST02). |
+| SG-014 | HIGH | Compiled Python Payload | A `.pyc` or `.pyo` file in a skill folder. Bytecode cannot be reviewed, and Python imports or runs it directly, so a payload can hide behind a harmless-looking skill that claims to call a `.py` script. If the matching `.py` source is missing, the finding names that source file (its file name, not its full path) and asks you to ship the source instead. |
 | SG-015 | MEDIUM | Well-known Skill Name Impersonation | Frontmatter names that closely resemble canonical skill names or add suspicious suffixes such as `1` or `-pro`. |
 
-That is 5 CRITICAL rules, 7 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
+That is 5 CRITICAL rules, 8 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
 
-Six rules have an OWASP tag: SG-001 (`owasp-asi01`), SG-002 (`owasp-asi02`), SG-003 (`owasp-asi03`), SG-010 (`owasp-asi04`), SG-007 (`owasp-asi05`) and SG-013 (`owasp-ast02`). These ASI IDs are not from the OWASP Agentic Skills Top 10, which uses the IDs AST01 to AST10. The other seven rules have no OWASP tag.
+Six rules have an OWASP tag: SG-001 (`owasp-asi01`), SG-002 (`owasp-asi02`), SG-003 (`owasp-asi03`), SG-010 (`owasp-asi04`), SG-007 (`owasp-asi05`) and SG-013 (`owasp-ast02`). These ASI IDs are not from the OWASP Agentic Skills Top 10, which uses the IDs AST01 to AST10. The other nine rules have no OWASP tag.
 
 SG-004 relates to the transparency obligations in Article 50 of the EU AI Act. [[4]](#sources)
 
@@ -350,7 +368,7 @@ skillshield scan SKILL.md --format json
 }
 ```
 
-For a directory, the output has `total`, `flagged`, `critical`, `flag_rate` and `results`. Each entry in `results` has `skill`, `risk_level`, `risk_score` and `findings`. Findings in a directory scan have `id`, `name`, `severity`, `description` and up to 3 `snippets`. They do not have `remediation` or `line_numbers`.
+For a directory, the output has `total`, `flagged`, `critical`, `errors`, `flag_rate`, `unscanned` and `results`. `unscanned` lists the files the scan did not open, relative to the scanned directory; it is empty when every file was read. Each entry in `results` has `skill`, `risk_level`, `risk_score` and `findings`. Findings in a directory scan have `id`, `name`, `severity`, `description` and up to 3 `snippets`. They do not have `remediation` or `line_numbers`.
 
 ```bash
 skillshield scan ./skills/ --format json
@@ -361,7 +379,11 @@ skillshield scan ./skills/ --format json
   "total": 2,
   "flagged": 1,
   "critical": 1,
+  "errors": 0,
   "flag_rate": 0.5,
+  "unscanned": [
+    "helper.zip"
+  ],
   "results": [
     {
       "skill": "SKILL.md",
@@ -408,7 +430,8 @@ skillshield scan ./skills/ --format sarif > skillshield.sarif
 
 - CRITICAL and HIGH findings have the level `error`. MEDIUM is `warning`, LOW is `note` and INFO is `none`.
 - Each result has one location per matched line, up to 5. A finding with no line numbers, such as SG-011, points at line 1.
-- The rule list in the log always holds all 13 rules.
+- The rule list in the log always holds all 15 rules.
+- Files the scan did not open are listed in `runs[0].properties.unscanned`. GitHub code scanning reads `runs[].results[]` only, so that field does not appear on the Security tab; read the SARIF file or the CLI JSON to see it.
 
 ---
 
@@ -433,11 +456,11 @@ jobs:
           path: skills
 ```
 
-The step fails when any file is HIGH or CRITICAL. A file counts as HIGH if its risk level is HIGH or it has a HIGH finding, so one HIGH finding fails the step even when its score alone would rate it MEDIUM. Flagged files are shown as annotations on the pull request and listed in the job summary.
+With the default `fail-on: high`, the step fails when any file is HIGH or CRITICAL; `fail-on: critical` fails on CRITICAL only, and `fail-on: medium` or `low` also fails the lower severities. A file counts as HIGH if its risk level is HIGH or it has a HIGH finding, so one HIGH finding fails the step even when its score alone would rate it MEDIUM. Flagged files are shown as annotations on the pull request and listed in the job summary. The log annotates the 50 worst files and the summary lists the same 50, plus up to 20 skipped paths with paths outside tooling directories first; the total counts stay in the table, and any list longer than that ends with `... and N more, not listed here`. Every list in the summary is capped and the totals stay in the table, which keeps the summary small on a scan with thousands of skipped or unreadable files. The caps limit how many entries are listed, not the length of each: a path or message is written as it is, so one very long path still takes its full width.
 
 | Input | Default | What it does |
 |---|---|---|
-| `path` | `.` | Files or directories to scan, one per line. Directories are scanned recursively, skipping `.git`, `node_modules` and virtual environments. |
+| `path` | `.` | Files or directories to scan, one per line. Directories are scanned recursively; `.git` and `node_modules` are skipped, and a virtual environment with `pyvenv.cfg` is skipped for text files. Compiled Python is scanned wherever it sits. |
 | `fail-on` | `high` | Fail at this level or above: `critical`, `high`, `medium`, `low` or `none`. |
 | `min-severity` | `info` | Ignore findings below this severity. |
 | `sarif-file` | a temporary file | Where to write the SARIF report. |
@@ -493,7 +516,7 @@ It takes the settings above as environment variables (`SKILLSHIELD_PATHS`, `SKIL
 
 A rule needs an `id`, `name`, `severity`, `description` and `remediation`, plus a `pattern` (a compiled regex) or a `check_fn` (a function that takes the text and returns a list of matched strings).
 
-`SkillScanner(rules=[my_rule])` runs only `my_rule`. To add a rule to the 13 defaults, pass `rules=ALL_RULES + [my_rule]`.
+`SkillScanner(rules=[my_rule])` runs only `my_rule`. To add a rule to the 15 defaults, pass `rules=ALL_RULES + [my_rule]`.
 
 ```python
 import re

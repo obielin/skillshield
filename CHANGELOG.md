@@ -6,29 +6,36 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
-- SG-001 now flags instruction overrides written in Chinese (Simplified and Traditional) and Japanese, such as "忽略之前的所有指令" or "以前の指示をすべて無視してください", including overriding the system prompt, a persona with no restrictions and switching off safety filters. Each language has its own labelled phrase list in `rules.py`, and a negated phrase ("請勿忽略…", "無視しないでください") is not flagged. Other languages are still open (#66).
-- SG-015, Well-known Skill Name Impersonation (MEDIUM): flags a skill whose frontmatter `name` is a near-copy of a well-known skill name, such as `cllawhub`, `clawhub1` or `polymarket-pro`. The names are in `src/skillshield/data/well_known_names.txt` (#57).
+- SG-001 now flags instruction overrides written in Chinese (Simplified and Traditional) and Japanese, such as "忽略之前的所有指令" or "以前の指示をすべて無視してください", including overriding the system prompt, a persona with no restrictions and switching off safety filters. Each language has its own labelled phrase list in `rules.py`, and a negated phrase ("請勿忽略…", "無視しないでください") is not flagged. These patterns only run on text that contains kana or CJK ideographs, so English files scan as fast as before. Other languages are still open (#66).
 
-### Changed
+## [1.3.0]
 
-- The package, CLI and Action descriptions now say SkillShield flags *known* attack patterns, and the README points to the Limitations section and the new [ROADMAP.md](ROADMAP.md).
+### Upgrade notes
+
+Two changes can make a scan fail where it passed before:
+
+- A file's risk level is now at least the severity of its worst finding, so a file with one HIGH finding is reported HIGH, not MEDIUM. `skillshield scan` on that file, and the GitHub Action at its default `fail-on: high`, now fail (#25).
+- Compiled Python (`.pyc`, `.pyo`) is reported wherever it is, including in a committed `.venv`. A repository that commits a virtual environment will fail the Action at `fail-on: high` (#42).
 
 ### Added
 
-- A red-team corpus (`tests/fixtures/redteam/`, `tests/test_redteam.py`): 31 defanged malicious skills, one per attack technique, 4 safe skills that look suspicious, and a skill folder that hides its payload outside `SKILL.md`. Techniques SkillShield does not catch yet are tracked as known gaps.
-- `docs/threat-coverage.md`: the attack techniques reported against agent skills in 2025–2026, with sources, and how far SkillShield covers each.
-- A Limitations section in the README.
-- SG-013, Untrusted Package Registry: flag `pip`, `npm` or `yarn` pointed at a registry other than the official one (`--index-url`, `--extra-index-url`, `-i`, `--registry`, `PIP_INDEX_URL`, npm/yarn config, or a `pip.conf`, `.npmrc` or `.pypirc` override), which lets a later install pull the attacker's packages (dependency confusion, OWASP AST02) (#46).
-- SG-006 now flags base64 data decoded and piped into a shell (`base64 -d | bash` and similar), whatever the length of the encoded string (#43). The ClawHavoc campaign used this as its execution trigger.
-- SG-008 now flags bidirectional control characters (U+202A to U+202E and U+2066 to U+2069), which make text display in a different order from how it is stored (Trojan Source, CVE-2021-42574) (#55). The finding shows the line with each character as `<U+202E>`, and names the character and line.
+- SG-013, Untrusted Package Registry (HIGH): flags `pip`, `npm` or `yarn` pointed at a registry other than the official one (`--index-url`, `--extra-index-url`, `pip install -i`, `--registry`, `PIP_INDEX_URL`, npm and yarn config, or a `pip.conf`, `.npmrc` or `.pypirc` override), which lets a later install pull the attacker's packages (OWASP AST02) (#46, by @Logic769).
+- SG-014, Compiled Python Payload (HIGH): flags `.pyc` and `.pyo` files in a skill, and notes when the matching `.py` source is missing. Bytecode runs directly but cannot be reviewed (#42, by @Logic769).
+- SG-015, Well-known Skill Name Impersonation (MEDIUM): flags a skill whose frontmatter `name` is a near-copy of a well-known skill name, such as `cllawhub`, `clawhub1` or `polymarket-pro`. The names are in `src/skillshield/data/well_known_names.txt` (#57, by @Lexus-099).
+- SG-006 flags base64 data decoded and piped into a shell (`base64 -d | bash` and similar), whatever the length of the encoded string, the execution trigger in the ClawHavoc campaign (#43, by @Logic769).
+- SG-008 flags bidirectional control characters (Trojan Source, CVE-2021-42574) and names each character and line (#55, by @Lark-Alfen).
+- Files a scan skips are listed as unscanned in text, JSON and SARIF output and in the Action's job summary. The job summary lists at most 50 entries per section, with full totals.
+- A red-team corpus (`tests/fixtures/redteam/`, `tests/test_redteam.py`) of 31 defanged malicious skills, 4 safe look-alikes and a skill folder that hides its payload outside `SKILL.md`, with known gaps tracked as issues.
+- `docs/threat-coverage.md`, mapping each published attack technique to its source and SkillShield's coverage; [ROADMAP.md](ROADMAP.md); and a Limitations section in the README.
+
+### Changed
+
+- The package, CLI and Action descriptions now say SkillShield flags *known* attack patterns.
 
 ### Fixed
 
-- A directory scan names each file by its path relative to the scanned directory (for example `a/SKILL.md`), with forward slashes, in text, JSON and SARIF output. Before, it used the file name only, so SARIF results for several `SKILL.md` files all pointed at `SKILL.md` (#24).
-
-### Fixed
-
-- A file's reported level is now at least the severity of its worst single finding, so one HIGH finding can no longer be diluted to MEDIUM by the file's other content; `skillshield.ci` exits non-zero when that file alone breaches the `fail-on` gate (issue #25).
+- A file's reported level is never below its worst finding (#25, by @bfs2021).
+- A directory scan names each file by its path relative to the scanned directory (`a/SKILL.md`) in text, JSON and SARIF output, so code scanning links findings to the right file (#24, by @babyhuey).
 
 ## [1.2.0]
 
