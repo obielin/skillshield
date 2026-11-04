@@ -8,6 +8,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.
 
+### Added
+
+- SG-008 now flags Unicode tag characters (U+E0000 to U+E007F), which are not drawn on screen but a model can read (ASCII smuggling), and the text hidden in them is decoded and scanned with every rule: a finding that came from hidden text says so. The tag characters of the England, Scotland and Wales flag emojis are not flagged (#54).
+
 ## [1.3.0]
 
 ### Upgrade notes

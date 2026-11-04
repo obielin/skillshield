@@ -13,8 +13,8 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | | Count |
 |---|---|
-| Malicious samples covered | 7 of 31 |
-| Malicious samples with an open gap | 24 of 31 |
+| Malicious samples covered | 8 of 31 |
+| Malicious samples with an open gap | 23 of 31 |
 | Payload files in a skill folder covered | 1 of 6 |
 | Safe samples wrongly flagged | 1 of 4 |
 
@@ -28,7 +28,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 | 04 | Zero-width characters inside words | AST08 | [Invariant Labs disclosure][invariant] | Gap: #27 |
 | 05 | Lookalike letters from other alphabets | AST08 | [Invariant Labs disclosure][invariant] | Gap: #27 |
 | 20 | Fake `<SYSTEM>` tag and "developer mode" | AST01 | [Snyk ToxicSkills][snyk-tox], [Invariant Labs][invariant] | Gap: #49 |
-| 23 | Instruction in invisible Unicode tag characters | AST08 | [ASCII smuggling][smuggle], [Snyk ToxicSkills][snyk-tox] | Gap: #54 |
+| 23 | Instruction in invisible Unicode tag characters | AST08 | [ASCII smuggling][smuggle], [Snyk ToxicSkills][snyk-tox] | Covered (SG-008) |
 | 24 | Right-to-left override characters | AST08 | [Trojan Source, CVE-2021-42574][trojan] | Covered (SG-008) |
 | 28 | Payload after 100,000 blank lines | AST08 | [Trail of Bits via CSA][csa] | Covered (SG-001) |
 | 29 | Injection in the frontmatter `description` | AST04 | [Anthropic][anthropic] | Covered (SG-001); frontmatter checks: #56 |

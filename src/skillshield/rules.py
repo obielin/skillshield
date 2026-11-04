@@ -263,6 +263,58 @@ RULE_SCOPE_CREEP = Rule(
 
 _BIDI_CONTROL_RE = re.compile("[\u202a-\u202e\u2066-\u2069]")
 
+# Unicode tag characters (U+E0000 to U+E007F) mirror ASCII but are not drawn on screen, while
+# a model can read them: "ASCII smuggling". A skill can look like one sentence and carry a
+# full hidden instruction.
+_TAG_RUN_RE = re.compile("[\U000e0000-\U000e007f]+")
+# The one real use is the emoji flag of England, Scotland or Wales: U+1F3F4, then a few
+# lowercase letters or digits as tags, then U+E007F. Only a run of exactly that shape, right
+# after U+1F3F4, is let through, so a flag in front of a hidden sentence does not hide it.
+_BLACK_FLAG = "\U0001f3f4"
+_FLAG_TAGS_RE = re.compile("[\U000e0061-\U000e007a\U000e0030-\U000e0039]{2,7}\U000e007f")
+
+
+def _decode_tags(run: str) -> str:
+    """The ASCII that a run of tag characters mirrors."""
+    return "".join(chr(ord(c) - 0xE0000) for c in run if 0xE0020 <= ord(c) <= 0xE007E)
+
+
+def hidden_tag_text(text: str) -> str:
+    """The text hidden in Unicode tag characters, decoded to ASCII ("" if there are none).
+
+    The scanner reads this with every rule, so a hidden "ignore all previous instructions" is
+    found as the instruction it is.
+    """
+    return " ".join(d for d in (_decode_tags(m.group(0)) for m in _TAG_RUN_RE.finditer(text)) if d)
+
+
+def tag_line_numbers(text: str) -> list[int]:
+    """The lines that carry Unicode tag characters."""
+    return [n for n, line in enumerate(text.splitlines(), start=1) if _TAG_RUN_RE.search(line)]
+
+
+def _hidden_tag_matches(text: str) -> list[str]:
+    """One match per line that carries tag characters other than a flag emoji's."""
+    matches = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        runs = [
+            m
+            for m in _TAG_RUN_RE.finditer(line)
+            if not (
+                m.start() and line[m.start() - 1] == _BLACK_FLAG and _FLAG_TAGS_RE.fullmatch(m[0])
+            )
+        ]
+        if not runs:
+            continue
+        count = sum(len(m[0]) for m in runs)
+        hidden = " ".join(d for d in (_decode_tags(m[0]) for m in runs) if d)
+        visible = _TAG_RUN_RE.sub("", line).strip()[:60]
+        matches.append(
+            f'{visible + " " if visible else ""}[line {lineno}: {count} invisible Unicode tag '
+            f'characters, decoding to "{hidden[:80]}"]'
+        )
+    return matches
+
 
 def _check_obfuscation(text: str) -> list[str]:
     matches = []
@@ -304,6 +356,7 @@ def _check_obfuscation(text: str) -> list[str]:
         names = ", ".join(f"U+{ord(c):04X} {unicodedata.name(c)}" for c in dict.fromkeys(found))
         matches.append(f"{shown} [line {lineno}: {names}]")
 
+    matches.extend(_hidden_tag_matches(text))
     return matches
 
 
@@ -318,13 +371,17 @@ RULE_OBFUSCATION = Rule(
         "Bidirectional control characters (U+202A-U+202E, U+2066-U+2069) make text "
         "display in a different order from how it is stored, so a reviewer reads "
         "something other than what the model reads (Trojan Source, CVE-2021-42574, "
-        "Boucher and Anderson)."
+        "Boucher and Anderson). Unicode tag characters (U+E0000-U+E007F) are not drawn "
+        "on screen but a model can read them, so a skill can carry a whole hidden "
+        "instruction in them (ASCII smuggling); the text they hide is decoded and "
+        "scanned with every rule."
     ),
     remediation=(
         "All skill instructions must be human-readable. Obfuscated content "
         "should be decoded and audited, or the skill should be rejected. Remove "
         "any bidirectional control characters; ordinary Arabic and Hebrew text "
-        "does not need them."
+        "does not need them. Remove any Unicode tag characters; only the emoji "
+        "flags of England, Scotland and Wales use them."
     ),
     check_fn=_check_obfuscation,
     tags=["obfuscation", "evasion", "supply-chain"],

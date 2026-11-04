@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Callable
 
 from skillshield.models import BatchScanReport, Finding, SkillScanResult
-from skillshield.rules import ALL_RULES, RULE_COMPILED_PYTHON, Rule, Severity
+from skillshield.rules import (
+    ALL_RULES,
+    RULE_COMPILED_PYTHON,
+    Rule,
+    Severity,
+    hidden_tag_text,
+    tag_line_numbers,
+)
 
 # Severity weights for risk score calculation
 _SEVERITY_WEIGHTS = {
@@ -177,6 +184,11 @@ class SkillScanner:
         t0 = time.time()
         findings: list[Finding] = []
 
+        # Text hidden in Unicode tag characters is read with every rule too, and the finding
+        # says it was hidden. Its line is the one that carries the tag characters.
+        hidden = hidden_tag_text(text)
+        hidden_lines = tag_line_numbers(text) if hidden else []
+
         for rule in self.rules:
             if self._below_min_severity(rule.severity):
                 continue
@@ -184,9 +196,18 @@ class SkillScanner:
                 snippets = rule.match(text)
             except Exception:
                 snippets = []
+            try:
+                found_hidden = rule.match(hidden) if hidden else []
+            except Exception:
+                found_hidden = []
             if snippets:
                 line_numbers = _find_line_numbers(text, snippets[0])
-                findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
+            elif found_hidden:
+                line_numbers = hidden_lines
+            else:
+                continue
+            snippets = snippets + [f"[hidden in Unicode tag characters] {s}" for s in found_hidden]
+            findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
 
         score = _compute_risk_score(findings)
         level = _risk_level(score, findings)
