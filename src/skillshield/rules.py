@@ -136,10 +136,11 @@ _PROMPT_INJECTION_PATTERNS_ZH = [
 # Japanese (#66). A negated verb right after the match ("無視しないで",
 # "変更しません", "無効にしないで", "忘れません") is not an override, nor is a polite
 # past-tense statement ("忘れました", "無視しました"). The plain past stays flagged:
-# "無視した上で…" is still an instruction.
+# "無視した上で…" is still an instruction, and so does the conditional
+# "無視しましたら…" ("once you have ignored…").
 _JA_GAP = r"[^。！？!?\n]{0,10}?"
 _JA_NOT = (
-    r"(?!(?:に|化)?(?:しな|せず|するな|しては|しません|しました|させな)|ない|ず|ません|ました)"
+    r"(?!(?:に|化)?(?:しな|せず|するな|しては|しません|しました(?!ら)|させな)|ない|ず|ません|ました(?!ら))"
 )
 
 _PROMPT_INJECTION_PATTERNS_JA = [
