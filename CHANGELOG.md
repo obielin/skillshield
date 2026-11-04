@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- SG-001 now flags instruction overrides written in Chinese (Simplified and Traditional) and Japanese, such as "忽略之前的所有指令" or "以前の指示をすべて無視してください", including overriding the system prompt, a persona with no restrictions and switching off safety filters. Each language has its own labelled phrase list in `rules.py`, and a negated phrase ("請勿忽略…", "無視しないでください") is not flagged. These patterns only run on text that contains kana or CJK ideographs, so English files scan as fast as before. Other languages are still open (#66).
+
 ## [1.3.0]
 
 ### Upgrade notes
