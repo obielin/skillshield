@@ -372,7 +372,7 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
 
     Commands end at an unquoted ; && or ||, stages at an unquoted |. Each stage comes back
     twice: as written, and with the quoted text left out, so that a word inside quotes is not
-    taken for a command. Single quotes run nothing; a double-quoted string keeps its text only
+    taken for a command. A " #" starts a comment that is left out. Single quotes run nothing; a double-quoted string keeps its text only
     when it holds a command substitution ($(...) or a backtick).
     """
     commands: list[list[tuple[str, str]]] = []
@@ -413,6 +413,8 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
             written.append(ch)
             i += 1
             continue
+        if ch == "#" and i > 0 and line[i - 1].isspace():
+            break  # an unquoted # after a space starts a comment: what follows runs nothing
         following = line[i + 1] if i + 1 < n else ""
         if ch == "\\" and following:
             written.append(ch + following)
