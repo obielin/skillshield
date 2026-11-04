@@ -127,7 +127,10 @@ def _locate(lines: list[str], snippet: str) -> list[int]:
     A snippet that is cut short (it ends in "...") or that spans lines is not in any one line
     whole, so the lines holding its first 40 characters are used instead.
     """
-    whole = [i + 1 for i, line in enumerate(lines) if snippet in line]
+    # A cut-short snippet is a prefix of the matched text, so look for the prefix: an exact
+    # match on its "..." would hide the lines where only the prefix appears.
+    needle = snippet[:-3] if snippet.endswith("...") and len(snippet) > 3 else snippet
+    whole = [i + 1 for i, line in enumerate(lines) if needle in line]
     if whole:
         return whole
     return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]

