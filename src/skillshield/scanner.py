@@ -210,7 +210,10 @@ class SkillScanner:
                 # An SG-008 tag match is a generated snippet that names its own line, so it is
                 # not in the text to be searched for.
                 tag_lines = [int(m[1]) for m in map(_TAG_SNIPPET_LINE_RE.search, snippets) if m]
-                line_numbers = sorted(set(line_numbers + tag_lines))
+                # The same rule can also match the hidden text, on the lines with tag characters.
+                line_numbers = sorted(
+                    set(line_numbers + tag_lines + (hidden_lines if found_hidden else []))
+                )
             elif found_hidden:
                 line_numbers = hidden_lines
             else:
