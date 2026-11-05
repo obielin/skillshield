@@ -247,8 +247,9 @@ class TestDataExfilRule:
         assert RULE_DATA_EXFIL.match("axios.post(url, { ...process.env })") != []
 
     @pytest.mark.parametrize("join", ["&&", "||", "??"])
-    def test_an_optional_chain_test_before_the_whole_environment_is_flagged(self, join):
-        text = f"fetch(url, {{body: JSON.stringify(process.env?.HOME {join} process.env)}})"
+    @pytest.mark.parametrize("access", ["?.", "."])
+    def test_a_property_test_before_the_whole_environment_is_flagged(self, join, access):
+        text = f"fetch(url, {{body: JSON.stringify(process.env{access}HOME {join} process.env)}})"
         assert RULE_DATA_EXFIL.match(text) != []
 
     @pytest.mark.parametrize(
@@ -258,9 +259,11 @@ class TestDataExfilRule:
             "fetch(url, {body: JSON.stringify(process.env?.HOME && process.env.PATH)})",
             "fetch(url, {body: JSON.stringify(process.env?.HOME && process.env?.PATH)})",
             "fetch(url, {body: JSON.stringify(process.env?.HOME || process.env['PATH'])})",
+            "fetch(url, {body: JSON.stringify(process.env.HOME && process.env.PATH)})",
+            "fetch(url, {body: JSON.stringify(process.env.HOME || process.env['PATH'])})",
         ],
     )
-    def test_an_optional_chain_test_with_single_variables_is_not_flagged(self, text):
+    def test_a_property_test_with_single_variables_is_not_flagged(self, text):
         assert RULE_DATA_EXFIL.match(text) == []
 
     def test_every_matched_snippet_is_located(self):
@@ -303,6 +306,24 @@ class TestDataExfilRule:
         snippet = "A" * 80 + "..."
         text = "A" * 100 + "\n# " + "A" * 80 + "..."
         assert _find_all_line_numbers(text, [snippet]) == [1, 2]
+
+    def test_a_literal_ellipsis_in_the_text_is_not_dropped_when_locating(self):
+        text = (
+            "payload = dict(os.environ) # harmless\n"
+            + "pass\n" * 7
+            + "payload = dict(os.environ) # ...\n"
+            + "requests.post(url, data=payload)"
+        )
+        found = SkillScanner().scan_text(text, name="SKILL.md").findings
+        sg002 = [f for f in found if f.rule_id == "SG-002"]
+        assert sg002 and sg002[0].line_numbers == [9]
+
+    def test_a_snippet_cut_below_the_cut_length_is_still_found_by_its_prefix(self):
+        from skillshield.scanner import _find_all_line_numbers
+
+        # "..." is added to a match that is shorter than the cut length too.
+        text = "x\n" + "B" * 70 + " tail\n"
+        assert _find_all_line_numbers(text, ["B" * 70 + "..."]) == [2]
 
     def test_the_snippet_shows_the_environment_on_a_long_line(self):
         padding = "x" * 300

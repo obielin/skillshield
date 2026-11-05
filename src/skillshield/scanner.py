@@ -121,18 +121,31 @@ def _find_line_numbers(text: str, snippet: str) -> list[int]:
     return _locate(text.splitlines(), snippet)
 
 
+# The checks that shorten a match cut it at 80 characters and add "...".
+_CUT_SHORT_LENGTH = 80 + len("...")
+
+
 def _locate(lines: list[str], snippet: str) -> list[int]:
     """The lines that carry a snippet.
 
     A snippet that is cut short (it ends in "...") or that spans lines is not in any one line
     whole, so the lines holding its first 40 characters are used instead.
     """
-    # A cut-short snippet is a prefix of the matched text, so look for the prefix: an exact
-    # match on its "..." would hide the lines where only the prefix appears.
-    needle = snippet[:-3] if snippet.endswith("...") and len(snippet) > 3 else snippet
-    whole = [i + 1 for i, line in enumerate(lines) if needle in line]
-    if whole:
-        return whole
+    ends_in_dots = snippet.endswith("...") and len(snippet) > 3
+    prefix = snippet[:-3] if ends_in_dots else snippet
+    # A snippet of the length a cut one has can be a prefix of longer text, so every line that
+    # starts like it counts, and a literal "..." in the text does not hide the others.
+    if ends_in_dots and len(snippet) == _CUT_SHORT_LENGTH:
+        return [i + 1 for i, line in enumerate(lines) if prefix in line]
+    # Any other "..." may be the text itself: the snippet as it is comes first, so that dropping
+    # it does not also find earlier lines that only share the prefix.
+    exact = [i + 1 for i, line in enumerate(lines) if snippet in line]
+    if exact:
+        return exact
+    if ends_in_dots:
+        whole = [i + 1 for i, line in enumerate(lines) if prefix in line]
+        if whole:
+            return whole
     return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]
 
 
