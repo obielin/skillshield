@@ -372,8 +372,9 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
 
     Commands end at an unquoted ; && or ||, stages at an unquoted |. Each stage comes back
     twice: as written, and with the quoted text left out, so that a word inside quotes is not
-    taken for a command. A " #" starts a comment that is left out. Single quotes run nothing; a double-quoted string keeps its text only
-    when it holds a command substitution ($(...) or a backtick).
+    taken for a command. A " #" after a download command starts a comment that is left out.
+    Single quotes run nothing; a double-quoted string keeps its text only when it holds a command
+    substitution ($(...) or a backtick).
     """
     commands: list[list[tuple[str, str]]] = []
     stages: list[tuple[str, str]] = []
@@ -381,6 +382,7 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
     outside: list[str] = []
     quoted: list[str] = []
     quote = ""
+    escaped_end = -1  # the index just after the last backslash escape, whose character is in a word
     i, n = 0, len(line)
     while i < n:
         ch = line[i]
@@ -413,13 +415,23 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
             written.append(ch)
             i += 1
             continue
-        if ch == "#" and i > 0 and line[i - 1].isspace():
-            break  # an unquoted # after a space starts a comment: what follows runs nothing
+        if (
+            ch == "#"
+            and i > 0
+            and line[i - 1].isspace()
+            and i != escaped_end
+            and _FETCHER.search(line[:i])
+        ):
+            # An unquoted # after a space, after a download command, starts a comment: what follows
+            # runs nothing. An escaped space (`X:\ #tag`) is part of the word, and a # before any
+            # download is read as prose ("Install #1: run curl ... | bash"), so both are scanned on.
+            break
         following = line[i + 1] if i + 1 < n else ""
         if ch == "\\" and following:
             written.append(ch + following)
             outside.append("  ")
             i += 2
+            escaped_end = i
             continue
         if ch == ";" or (ch in "&|" and following == ch):
             stages.append(("".join(written), "".join(outside)))
