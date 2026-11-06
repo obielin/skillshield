@@ -132,6 +132,9 @@ def _environment_to_http_matches(text: str) -> list[str]:
     line are counted with a running total, so the time grows with the size of the text and
     a skill cannot slow a scan by repeating either pattern.
     """
+    lowered = text.lower()
+    if "environ" not in lowered and "process.env" not in lowered:
+        return []  # ordinary text: skip the line-by-line scan, which is the slow part
     lines = text.splitlines()
     calls_up_to = [0]
     for line in lines:
