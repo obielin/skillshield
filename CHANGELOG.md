@@ -8,6 +8,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.
 
+### Added
+
+- SG-006 now flags a script fetched with `curl` or `wget` and piped into a shell (`curl ... | bash`, `wget -qO- ... | sudo sh`), including `bash <(curl ...)`, `sh -c "$(curl ...)"` and `eval "$(wget ...)"`. Python counts only when it reads the script from stdin, so `curl ... | python3 -m json.tool` is not flagged (#30).
+
 ## [1.3.0]
 
 ### Upgrade notes
