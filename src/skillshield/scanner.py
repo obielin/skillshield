@@ -124,6 +124,7 @@ def _find_line_numbers(text: str, snippet: str) -> list[int]:
     lines = text.splitlines()
     return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]
 
+
 _BASE64_RE = re.compile(r"[A-Za-z0-9+/]{60,}={0,2}")
 _MAX_BASE64_CHARS = 64 * 1024
 _MIN_PRINTABLE_RATIO = 0.85
@@ -151,10 +152,7 @@ def _decode_base64_payloads(text: str) -> list[tuple[str, int]]:
         if not decoded:
             continue
 
-        printable_count = sum(
-            char.isprintable() or char in "\r\n\t"
-            for char in decoded
-        )
+        printable_count = sum(char.isprintable() or char in "\r\n\t" for char in decoded)
         printable_ratio = printable_count / len(decoded)
 
         if printable_ratio >= _MIN_PRINTABLE_RATIO:
@@ -235,17 +233,16 @@ class SkillScanner:
                         rule=rule,
                         snippets=snippets,
                         line_numbers=line_numbers,
-                        )
                     )
+                )
 
         # Check whether SG-008 obfuscation scanning is enabled.
         obfuscation_enabled = any(
-            rule.id == "SG-008"
-            and not self._below_min_severity(rule.severity)
+            rule.id == "SG-008" and not self._below_min_severity(rule.severity)
             for rule in self.rules
         )
-    # 3. Scan decoded Base64 content once.
-    # Do not recursively decode the decoded content.
+        # 3. Scan decoded Base64 content once.
+        # Do not recursively decode the decoded content.
         if obfuscation_enabled:
             for decoded_text, source_line in _decode_base64_payloads(text):
                 for rule in self.rules:
@@ -266,13 +263,10 @@ class SkillScanner:
                         findings.append(
                             Finding(
                                 rule=rule,
-                                snippets=[
-                                f"[decoded base64] {snippet}"
-                                for snippet in snippets
-                            ],
-                            line_numbers=[source_line],
+                                snippets=[f"[decoded base64] {snippet}" for snippet in snippets],
+                                line_numbers=[source_line],
+                            )
                         )
-                    )
         score = _compute_risk_score(findings)
         level = _risk_level(score, findings)
 

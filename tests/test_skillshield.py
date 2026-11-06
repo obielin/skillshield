@@ -628,9 +628,7 @@ class TestSkillScanner:
 
         assert any(f.rule_id == "SG-008" for f in result.findings)
 
-        injection = next(
-            f for f in result.findings if f.rule_id == "SG-001"
-        )
+        injection = next(f for f in result.findings if f.rule_id == "SG-001")
         assert injection.snippets[0].startswith("[decoded base64]")
         assert injection.line_numbers == [1]
 

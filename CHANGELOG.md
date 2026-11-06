@@ -23,6 +23,7 @@ Two changes can make a scan fail where it passed before:
 - SG-014, Compiled Python Payload (HIGH): flags `.pyc` and `.pyo` files in a skill, and notes when the matching `.py` source is missing. Bytecode runs directly but cannot be reviewed (#42, by @Logic769).
 - SG-015, Well-known Skill Name Impersonation (MEDIUM): flags a skill whose frontmatter `name` is a near-copy of a well-known skill name, such as `cllawhub`, `clawhub1` or `polymarket-pro`. The names are in `src/skillshield/data/well_known_names.txt` (#57, by @Lexus-099).
 - SG-006 flags base64 data decoded and piped into a shell (`base64 -d | bash` and similar), whatever the length of the encoded string, the execution trigger in the ClawHavoc campaign (#43, by @Logic769).
+- SG-008 now decodes bounded Base64 text payloads and scans the decoded content against existing security rules. Decoding is performed only once, and binary or non-printable payloads are ignored.
 - SG-008 flags bidirectional control characters (Trojan Source, CVE-2021-42574) and names each character and line (#55, by @Lark-Alfen).
 - Files a scan skips are listed as unscanned in text, JSON and SARIF output and in the Action's job summary. The job summary lists at most 50 entries per section, with full totals.
 - A red-team corpus (`tests/fixtures/redteam/`, `tests/test_redteam.py`) of 31 defanged malicious skills, 4 safe look-alikes and a skill folder that hides its payload outside `SKILL.md`, with known gaps tracked as issues.
