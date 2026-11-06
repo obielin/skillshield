@@ -420,6 +420,37 @@ class TestPackageRegistryRule:
         assert len(hits) == 5_000
         assert elapsed < 2.0
 
+    @pytest.mark.parametrize("executable", ["pip3.10", "pip3.12", "pip3.13"])
+    def test_versioned_pip_short_index_option(self, executable):
+        text = f"{executable} install -i https://example.com/simple helper-package"
+        hits = RULE_PACKAGE_REGISTRY.match(text)
+        assert hits == ["-i https://example.com/simple"]
+
+    def test_versioned_pip_attached_short_index_option(self):
+        hits = RULE_PACKAGE_REGISTRY.match(
+            "/usr/bin/pip3.12 install helper-package -ihttps://example.org/simple"
+        )
+        assert hits == ["-ihttps://example.org/simple"]
+
+    def test_versioned_pip_official_index_stays_clean(self):
+        assert (
+            RULE_PACKAGE_REGISTRY.match("pip3.12 install -i https://pypi.org/simple requests") == []
+        )
+
+    def test_versioned_pip_does_not_capture_another_commands_short_flag(self):
+        assert (
+            RULE_PACKAGE_REGISTRY.match(
+                "pip3.12 install requests && curl -i https://example.com/health"
+            )
+            == []
+        )
+
+    def test_versioned_pip_near_miss_command_stays_clean(self):
+        assert (
+            RULE_PACKAGE_REGISTRY.match("pip3.12-helper install -i https://example.com/simple pkg")
+            == []
+        )
+
     def test_clean_passes(self):
         assert RULE_PACKAGE_REGISTRY.match(CLEAN_SKILL) == []
 
