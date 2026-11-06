@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import importlib.util
+import re
 import sys
 import time
 from pathlib import Path
@@ -121,6 +124,45 @@ def _find_line_numbers(text: str, snippet: str) -> list[int]:
     lines = text.splitlines()
     return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]
 
+_BASE64_RE = re.compile(r"[A-Za-z0-9+/]{60,}={0,2}")
+_MAX_BASE64_CHARS = 64 * 1024
+_MIN_PRINTABLE_RATIO = 0.85
+
+
+def _decode_base64_payloads(text: str) -> list[tuple[str, int]]:
+    """Decode bounded Base64 runs containing mostly printable UTF-8 text."""
+    decoded_payloads = []
+
+    for match in _BASE64_RE.finditer(text):
+        encoded = match.group(0)
+
+        if len(encoded) > _MAX_BASE64_CHARS:
+            continue
+
+        try:
+            decoded_bytes = base64.b64decode(
+                encoded + "=" * (-len(encoded) % 4),
+                validate=True,
+            )
+            decoded = decoded_bytes.decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            continue
+
+        if not decoded:
+            continue
+
+        printable_count = sum(
+            char.isprintable() or char in "\r\n\t"
+            for char in decoded
+        )
+        printable_ratio = printable_count / len(decoded)
+
+        if printable_ratio >= _MIN_PRINTABLE_RATIO:
+            line_number = text.count("\n", 0, match.start()) + 1
+            decoded_payloads.append((decoded, line_number))
+
+    return decoded_payloads
+
 
 class SkillScanner:
     """
@@ -177,6 +219,7 @@ class SkillScanner:
         t0 = time.time()
         findings: list[Finding] = []
 
+        # 1. Scan the original text using all configured rules.
         for rule in self.rules:
             if self._below_min_severity(rule.severity):
                 continue
@@ -184,10 +227,52 @@ class SkillScanner:
                 snippets = rule.match(text)
             except Exception:
                 snippets = []
+
             if snippets:
                 line_numbers = _find_line_numbers(text, snippets[0])
-                findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
+                findings.append(
+                    Finding(
+                        rule=rule,
+                        snippets=snippets,
+                        line_numbers=line_numbers,
+                        )
+                    )
 
+        # Check whether SG-008 obfuscation scanning is enabled.
+        obfuscation_enabled = any(
+            rule.id == "SG-008"
+            and not self._below_min_severity(rule.severity)
+            for rule in self.rules
+        )
+    # 3. Scan decoded Base64 content once.
+    # Do not recursively decode the decoded content.
+        if obfuscation_enabled:
+            for decoded_text, source_line in _decode_base64_payloads(text):
+                for rule in self.rules:
+
+                    # Do not recursively scan Base64.
+                    if rule.id == "SG-008":
+                        continue
+
+                    if self._below_min_severity(rule.severity):
+                        continue
+
+                    try:
+                        snippets = rule.match(decoded_text)
+                    except Exception:
+                        snippets = []
+
+                    if snippets:
+                        findings.append(
+                            Finding(
+                                rule=rule,
+                                snippets=[
+                                f"[decoded base64] {snippet}"
+                                for snippet in snippets
+                            ],
+                            line_numbers=[source_line],
+                        )
+                    )
         score = _compute_risk_score(findings)
         level = _risk_level(score, findings)
 
