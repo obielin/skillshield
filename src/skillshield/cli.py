@@ -134,6 +134,7 @@ def cmd_scan(args) -> int:
                                 "id": f.rule_id,
                                 "name": f.name,
                                 "severity": f.severity.value,
+                                "tags": f.rule.tags,
                                 "description": f.rule.description,
                                 "snippets": f.snippets[:3],
                             }
@@ -173,6 +174,7 @@ def cmd_scan(args) -> int:
                     "id": f.rule_id,
                     "name": f.name,
                     "severity": f.severity.value,
+                    "tags": f.rule.tags,
                     "description": f.rule.description,
                     "remediation": f.rule.remediation,
                     "snippets": f.snippets[:3],

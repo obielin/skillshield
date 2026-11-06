@@ -373,7 +373,7 @@ skillshield scan ./skills/
 
 ### JSON
 
-For one file, the output has `skill`, `risk_level`, `risk_score` and `findings`. Each finding has `id`, `name`, `severity`, `description`, `remediation`, up to 3 `snippets` and up to 5 `line_numbers`.
+For one file, the output has `skill`, `risk_level`, `risk_score` and `findings`. Each finding has `id`, `name`, `severity`, `tags`, `description`, `remediation`, up to 3 `snippets` and up to 5 `line_numbers`.
 
 ```bash
 skillshield scan SKILL.md --format json
@@ -389,6 +389,16 @@ skillshield scan SKILL.md --format json
       "id": "SG-011",
       "name": "Lethal Trifecta (Supply Chain Attack Pattern)",
       "severity": "critical",
+      "tags": [
+        "lethal-trifecta",
+        "clawhavoc",
+        "critical",
+        "supply-chain",
+        "owasp-asi01",
+        "owasp-asi02",
+        "owasp-ast01",
+        "owasp-ast03"
+      ],
       "description": "The skill combines all three components of the ClawHavoc supply chain attack pattern: prompt injection to override the agent, file system access to harvest data, and network access to exfiltrate it. This combination is the definitive signature of a malicious skill.",
       "remediation": "Immediately reject and report this skill. Do not install it under any circumstances. File an issue with the skill marketplace if applicable.",
       "snippets": [
@@ -400,6 +410,12 @@ skillshield scan SKILL.md --format json
       "id": "SG-001",
       "name": "Prompt Injection",
       "severity": "critical",
+      "tags": [
+        "injection",
+        "clawhavoc",
+        "owasp-asi01",
+        "owasp-ast01"
+      ],
       "description": "The skill contains text that attempts to override, ignore, or bypass the agent's system prompt or safety guidelines. This is the primary technique used in the ClawHavoc campaign (341 malicious skills, Jan 2026).",
       "remediation": "Remove all instruction-override language. Legitimate skills never need to modify the agent's base instructions or identity.",
       "snippets": [
@@ -413,7 +429,7 @@ skillshield scan SKILL.md --format json
 }
 ```
 
-For a directory, the output has `total`, `flagged`, `critical`, `errors`, `flag_rate`, `unscanned` and `results`. `unscanned` lists the files the scan did not open, relative to the scanned directory; it is empty when every file was read. Each entry in `results` has `skill`, `risk_level`, `risk_score` and `findings`. Findings in a directory scan have `id`, `name`, `severity`, `description` and up to 3 `snippets`. They do not have `remediation` or `line_numbers`.
+For a directory, the output has `total`, `flagged`, `critical`, `errors`, `flag_rate`, `unscanned` and `results`. `unscanned` lists the files the scan did not open, relative to the scanned directory; it is empty when every file was read. Each entry in `results` has `skill`, `risk_level`, `risk_score` and `findings`. Findings in a directory scan have `id`, `name`, `severity`, `tags`, `description` and up to 3 `snippets`. They do not have `remediation` or `line_numbers`.
 
 ```bash
 skillshield scan ./skills/ --format json
@@ -439,6 +455,16 @@ skillshield scan ./skills/ --format json
           "id": "SG-011",
           "name": "Lethal Trifecta (Supply Chain Attack Pattern)",
           "severity": "critical",
+          "tags": [
+            "lethal-trifecta",
+            "clawhavoc",
+            "critical",
+            "supply-chain",
+            "owasp-asi01",
+            "owasp-asi02",
+            "owasp-ast01",
+            "owasp-ast03"
+          ],
           "description": "The skill combines all three components of the ClawHavoc supply chain attack pattern: prompt injection to override the agent, file system access to harvest data, and network access to exfiltrate it. This combination is the definitive signature of a malicious skill.",
           "snippets": [
             "LETHAL TRIFECTA: Prompt injection + network access + file system access detected together. This combination is the hallmark of ClawHavoc-style supply chain attack skills."
@@ -448,6 +474,12 @@ skillshield scan ./skills/ --format json
           "id": "SG-001",
           "name": "Prompt Injection",
           "severity": "critical",
+          "tags": [
+            "injection",
+            "clawhavoc",
+            "owasp-asi01",
+            "owasp-ast01"
+          ],
           "description": "The skill contains text that attempts to override, ignore, or bypass the agent's system prompt or safety guidelines. This is the primary technique used in the ClawHavoc campaign (341 malicious skills, Jan 2026).",
           "snippets": [
             "Ignore all previous instructions"
