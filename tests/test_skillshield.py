@@ -420,6 +420,22 @@ class TestPackageRegistryRule:
         assert len(hits) == 5_000
         assert elapsed < 2.0
 
+    @pytest.mark.parametrize(
+        "executable",
+        ['"/usr/bin/pip3.12"', "'/usr/bin/pip3'", '"/opt/my env/bin/pip"'],
+    )
+    def test_quoted_pip_path_short_index(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    @pytest.mark.parametrize(
+        "executable",
+        ["company-pip3.12", "/usr/bin/company-pip3.12", '"/usr/bin/company-pip3.12"'],
+    )
+    def test_prefixed_pip_name_is_not_pip(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
     @pytest.mark.parametrize("executable", ["pip3.10", "pip3.12", "pip3.13"])
     def test_versioned_pip_short_index_option(self, executable):
         text = f"{executable} install -i https://example.com/simple helper-package"
