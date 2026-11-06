@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -263,6 +264,118 @@ RULE_SCOPE_CREEP = Rule(
 
 _BIDI_CONTROL_RE = re.compile("[\u202a-\u202e\u2066-\u2069]")
 
+# Unicode tag characters (U+E0000 to U+E007F) mirror ASCII but are not drawn on screen, while
+# a model can read them: "ASCII smuggling". A skill can look like one sentence and carry a
+# full hidden instruction.
+_TAG_RUN_RE = re.compile("[\U000e0000-\U000e007f]+")
+# The one real use is the emoji flag of England, Scotland or Wales: U+1F3F4, then the tags for
+# "gbeng", "gbsct" or "gbwls", then U+E007F. Only one of those three runs, right after U+1F3F4, is
+# let through, so a flag in front of a hidden sentence does not hide it, and neither does a run
+# that only looks like a flag (tags for "abc" and the cancel tag, say).
+_BLACK_FLAG = "\U0001f3f4"
+_FLAG_CODES = ("gbeng", "gbsct", "gbwls")
+_FLAG_TAGS_RE = re.compile(
+    "(?:"
+    + "|".join("".join(chr(0xE0000 + ord(c)) for c in code) for code in _FLAG_CODES)
+    + ")\U000e007f"
+)
+
+
+def _decode_tags(run: str) -> str:
+    """The ASCII that a run of tag characters mirrors."""
+    return "".join(chr(ord(c) - 0xE0000) for c in run if 0xE0020 <= ord(c) <= 0xE007E)
+
+
+def _join_decoded(text: str, runs) -> str:
+    """The decoded runs, in order. Two runs with only visible, non-space characters between them
+    are one word split by those characters, so they are joined as they are ("Ig" + "x" + "nore" is
+    "Ignore"); whitespace or a line break between them keeps a space."""
+    parts: list[str] = []
+    prev_end = 0
+    for m in runs:
+        decoded = _decode_tags(m.group(0))
+        if not decoded:
+            continue
+        if parts and any(c.isspace() for c in text[prev_end : m.start()]):
+            parts.append(" ")
+        parts.append(decoded)
+        prev_end = m.end()
+    return "".join(parts)
+
+
+def hidden_tag_text_with_lines(text: str) -> tuple[str, list[int]]:
+    """The text hidden in Unicode tag characters, decoded to ASCII, and the line each of its
+    characters came from (one number per character; both empty if there are no tag characters).
+
+    The line is worked out from the text itself, never read back from a snippet, so text written
+    by the skill cannot choose it.
+    """
+    starts: list[int] = []
+    position = 0
+    for line in text.splitlines(keepends=True):
+        starts.append(position)
+        position += len(line)
+    parts: list[str] = []
+    owners: list[int] = []
+    prev_end = 0
+    for m in _TAG_RUN_RE.finditer(text):
+        decoded = _decode_tags(m.group(0))
+        if not decoded:
+            continue
+        lineno = bisect_right(starts, m.start())
+        if parts and any(c.isspace() for c in text[prev_end : m.start()]):
+            parts.append(" ")
+            owners.append(lineno)
+        parts.append(decoded)
+        owners.extend([lineno] * len(decoded))
+        prev_end = m.end()
+    return "".join(parts), owners
+
+
+def hidden_tag_text(text: str) -> str:
+    """The text hidden in Unicode tag characters, decoded to ASCII ("" if there are none).
+
+    The scanner reads this with every rule, so a hidden "ignore all previous instructions" is
+    found as the instruction it is.
+    """
+    return hidden_tag_text_with_lines(text)[0]
+
+
+def hidden_tag_match_lines(text: str) -> list[int]:
+    """The lines of the SG-008 tag matches, taken from the text and not from the snippets."""
+    return [lineno for lineno, _ in _hidden_tag_hits(text)]
+
+
+def _hidden_tag_matches(text: str) -> list[str]:
+    """One match per line that carries tag characters other than a flag emoji's."""
+    return [snippet for _, snippet in _hidden_tag_hits(text)]
+
+
+def _hidden_tag_hits(text: str) -> list[tuple[int, str]]:
+    """The line and the match for each line that carries tag characters other than a flag's."""
+    matches: list[tuple[int, str]] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        runs = [
+            m
+            for m in _TAG_RUN_RE.finditer(line)
+            if not (
+                m.start() and line[m.start() - 1] == _BLACK_FLAG and _FLAG_TAGS_RE.fullmatch(m[0])
+            )
+        ]
+        if not runs:
+            continue
+        count = sum(len(m[0]) for m in runs)
+        hidden = _join_decoded(line, runs)
+        visible = _TAG_RUN_RE.sub("", line).strip()[:60]
+        matches.append(
+            (
+                lineno,
+                f'{visible + " " if visible else ""}[line {lineno}: {count} invisible Unicode tag '
+                f'characters, decoding to "{hidden[:80]}"]',
+            )
+        )
+    return matches
+
 
 def _check_obfuscation(text: str) -> list[str]:
     matches = []
@@ -304,6 +417,7 @@ def _check_obfuscation(text: str) -> list[str]:
         names = ", ".join(f"U+{ord(c):04X} {unicodedata.name(c)}" for c in dict.fromkeys(found))
         matches.append(f"{shown} [line {lineno}: {names}]")
 
+    matches.extend(_hidden_tag_matches(text))
     return matches
 
 
@@ -318,13 +432,17 @@ RULE_OBFUSCATION = Rule(
         "Bidirectional control characters (U+202A-U+202E, U+2066-U+2069) make text "
         "display in a different order from how it is stored, so a reviewer reads "
         "something other than what the model reads (Trojan Source, CVE-2021-42574, "
-        "Boucher and Anderson)."
+        "Boucher and Anderson). Unicode tag characters (U+E0000-U+E007F) are not drawn "
+        "on screen but a model can read them, so a skill can carry a whole hidden "
+        "instruction in them (ASCII smuggling); the text they hide is decoded and "
+        "scanned with every rule."
     ),
     remediation=(
         "All skill instructions must be human-readable. Obfuscated content "
         "should be decoded and audited, or the skill should be rejected. Remove "
         "any bidirectional control characters; ordinary Arabic and Hebrew text "
-        "does not need them."
+        "does not need them. Remove any Unicode tag characters; only the emoji "
+        "flags of England, Scotland and Wales use them."
     ),
     check_fn=_check_obfuscation,
     tags=["obfuscation", "evasion", "supply-chain"],
