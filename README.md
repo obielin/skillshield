@@ -246,9 +246,54 @@ The outputs in the comments come from scanning the sample `SKILL.md` above, and 
 
 That is 5 CRITICAL rules, 8 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
 
-Six rules have an OWASP tag: SG-001 (`owasp-asi01`), SG-002 (`owasp-asi02`), SG-003 (`owasp-asi03`), SG-010 (`owasp-asi04`), SG-007 (`owasp-asi05`) and SG-013 (`owasp-ast02`). These ASI IDs are not from the OWASP Agentic Skills Top 10, which uses the IDs AST01 to AST10. The other nine rules have no OWASP tag.
+Every rule is tagged with the OWASP risks it relates to; see [SkillShield and agentic security](#skillshield-and-agentic-security).
 
 SG-004 relates to the transparency obligations in Article 50 of the EU AI Act. [[4]](#sources)
+
+---
+
+## SkillShield and agentic security
+
+An agent skill is a set of instructions and scripts that an AI agent loads and follows. Skills are part of an agent's supply chain: a malicious one does not need an exploit, because it can simply tell the agent to read secrets, run code or send data away. SkillShield checks skills before an agent trusts them.
+
+OWASP publishes two lists that cover this area:
+
+- the [OWASP Top 10 for Agentic Applications](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) (December 2025), with risks ASI01 to ASI10 for AI agents in general [[5]](#sources)
+- the [OWASP Agentic Skills Top 10](https://owasp.org/www-project-agentic-skills-top-10/), with risks AST01 to AST10 for skills specifically. It is an OWASP Incubator project, so its wording may still change. [[3]](#sources)
+
+Each rule carries tags such as `owasp-asi01` and `owasp-ast01`. They appear in `skillshield rules`, in JSON output and in SARIF, so findings can be filtered or reported by OWASP risk. The mapping is SkillShield's own judgement of which risks a rule helps detect; OWASP has not reviewed it.
+
+| Rule | Name | Agentic Applications | Agentic Skills |
+|---|---|---|---|
+| SG-001 | Prompt Injection | ASI01 Agent Goal Hijack | AST01 Malicious Skills |
+| SG-002 | Data Exfiltration | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
+| SG-003 | Privilege Escalation | ASI05 Unexpected Code Execution; ASI03 Identity and Privilege Abuse | AST01 Malicious Skills |
+| SG-004 | Identity Hijacking | ASI09 Human-Agent Trust Exploitation | AST01 Malicious Skills |
+| SG-005 | Hardcoded Secret / Credential | ASI03 Identity and Privilege Abuse | None |
+| SG-006 | Rug Pull / Remote Code Execution | ASI05 Unexpected Code Execution | AST01 Malicious Skills; AST07 Update Drift |
+| SG-007 | Scope Creep / Excessive Permissions | ASI03 Identity and Privilege Abuse | AST03 Over-Privileged Skills |
+| SG-008 | Obfuscated Payload | ASI01 Agent Goal Hijack | AST08 Poor Scanning |
+| SG-009 | Covert Channel | ASI01 Agent Goal Hijack | AST08 Poor Scanning |
+| SG-010 | Social Engineering | ASI09 Human-Agent Trust Exploitation | AST01 Malicious Skills |
+| SG-011 | Lethal Trifecta | ASI01 Agent Goal Hijack; ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills; AST03 Over-Privileged Skills |
+| SG-012 | Suspicious URL | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
+| SG-013 | Untrusted Package Registry | ASI04 Agentic Supply Chain Vulnerabilities | AST02 Supply Chain Compromise |
+| SG-014 | Compiled Python Payload | ASI04 Agentic Supply Chain Vulnerabilities | AST01 Malicious Skills; AST08 Poor Scanning |
+| SG-015 | Well-known Skill Name Impersonation | ASI04 Agentic Supply Chain Vulnerabilities | AST04 Insecure Metadata |
+
+AST08 (Poor Scanning) is the risk that a scanner misses what is hidden in a skill. SG-008, SG-009 and SG-014 flag the hiding techniques themselves: encoded text, invisible channels and compiled code that cannot be read.
+
+### What is not covered yet
+
+Some risks are planned, and have an open issue:
+
+- **ASI06 Memory and Context Poisoning:** a skill that writes instructions into agent memory files such as `MEMORY.md` or `CLAUDE.md` (#47).
+- **AST02 Supply Chain Compromise, through agent settings:** hooks, MCP servers and auto-approval settings in a project (#93).
+- **AST05 Untrusted External Instructions:** a skill that fetches its instructions from a URL at run time (#52).
+- **AST07 Update Drift:** locking a skill after review and detecting changes (#35, #76).
+- **AST09 No Governance:** finding and scanning the skills already installed on a computer (#92).
+
+Others happen while an agent runs, or between agents, so a scanner that reads a skill before it is installed cannot check them: ASI07 Insecure Inter-Agent Communication, ASI08 Cascading Failures, ASI10 Rogue Agents, AST06 Weak Isolation and AST10 Cross-Platform Reuse. Defending against these needs runtime controls such as sandboxing, credential isolation and monitoring of what the agent does. [ROADMAP.md](ROADMAP.md) describes a runtime guard as a later stage (#77).
 
 ---
 
@@ -579,6 +624,7 @@ black --check src tests
 2. Snyk, "Snyk Finds Prompt Injection in 36%, 1467 Malicious Payloads in a ToxicSkills Study of Agent Skills Supply Chain Compromise", 5 February 2026. The figures above come from the body of the post. <https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub>
 3. OWASP Agentic Skills Top 10. <https://owasp.org/www-project-agentic-skills-top-10/> · [Risk list on GitHub](https://github.com/OWASP/www-project-agentic-skills-top-10)
 4. EU AI Act, Article 50: Transparency obligations for providers and deployers of certain AI systems. <https://artificialintelligenceact.eu/article/50/>
+5. OWASP GenAI Security Project, OWASP Top 10 for Agentic Applications for 2026, 9 December 2025. <https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/>
 
 ---
 
