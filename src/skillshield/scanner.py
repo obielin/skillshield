@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import re
 import sys
 import time
 from pathlib import Path
@@ -15,8 +14,8 @@ from skillshield.rules import (
     RULE_COMPILED_PYTHON,
     Rule,
     Severity,
-    hidden_tag_text,
-    tag_line_numbers,
+    hidden_tag_match_lines,
+    hidden_tag_text_with_lines,
 )
 
 # Severity weights for risk score calculation
@@ -124,10 +123,6 @@ def _risk_level(score: float, findings: list[Finding]) -> str:
     return level
 
 
-# "[line 3: 12 invisible Unicode tag characters, ...]", as the SG-008 tag match writes it.
-_TAG_SNIPPET_LINE_RE = re.compile(r"\[line (\d+): \d+ invisible Unicode tag")
-
-
 def _find_line_numbers(text: str, snippet: str) -> list[int]:
     """Return line numbers where a snippet appears in text."""
     lines = text.splitlines()
@@ -190,9 +185,9 @@ class SkillScanner:
         findings: list[Finding] = []
 
         # Text hidden in Unicode tag characters is read with every rule too, and the finding
-        # says it was hidden. Its line is the one that carries the tag characters.
-        hidden = hidden_tag_text(text)
-        hidden_lines = tag_line_numbers(text) if hidden else []
+        # says it was hidden. Each character of it knows the line it came from, taken from the
+        # text itself: a line number is never read back from a snippet, which the skill wrote.
+        hidden, hidden_owners = hidden_tag_text_with_lines(text)
 
         for rule in self.rules:
             if self._below_min_severity(rule.severity):
@@ -205,19 +200,19 @@ class SkillScanner:
                 found_hidden = rule.match(hidden) if hidden else []
             except Exception:
                 found_hidden = []
-            if snippets:
-                line_numbers = _find_line_numbers(text, snippets[0])
-                # An SG-008 tag match is a generated snippet that names its own line, so it is
-                # not in the text to be searched for.
-                tag_lines = [int(m[1]) for m in map(_TAG_SNIPPET_LINE_RE.search, snippets) if m]
-                # The same rule can also match the hidden text, on the lines with tag characters.
-                line_numbers = sorted(
-                    set(line_numbers + tag_lines + (hidden_lines if found_hidden else []))
-                )
-            elif found_hidden:
-                line_numbers = hidden_lines
-            else:
+            if not snippets and not found_hidden:
                 continue
+            line_numbers = set(_find_line_numbers(text, snippets[0])) if snippets else set()
+            if rule.id == "SG-008":
+                # The tag matches are generated snippets, so they are not in the text to be
+                # searched for; their lines come from the text.
+                line_numbers.update(hidden_tag_match_lines(text))
+            # A match in the hidden text reports the lines whose characters it is made of.
+            for match in found_hidden:
+                start = hidden.find(match)
+                owners = hidden_owners[start : start + len(match)] if start >= 0 else []
+                line_numbers.update(owners or hidden_owners)
+            line_numbers = sorted(n for n in line_numbers if n >= 1)
             snippets = snippets + [f"[hidden in Unicode tag characters] {s}" for s in found_hidden]
             findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
 

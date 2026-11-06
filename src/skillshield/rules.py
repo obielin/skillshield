@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -302,23 +303,57 @@ def _join_decoded(text: str, runs) -> str:
     return "".join(parts)
 
 
+def hidden_tag_text_with_lines(text: str) -> tuple[str, list[int]]:
+    """The text hidden in Unicode tag characters, decoded to ASCII, and the line each of its
+    characters came from (one number per character; both empty if there are no tag characters).
+
+    The line is worked out from the text itself, never read back from a snippet, so text written
+    by the skill cannot choose it.
+    """
+    starts: list[int] = []
+    position = 0
+    for line in text.splitlines(keepends=True):
+        starts.append(position)
+        position += len(line)
+    parts: list[str] = []
+    owners: list[int] = []
+    prev_end = 0
+    for m in _TAG_RUN_RE.finditer(text):
+        decoded = _decode_tags(m.group(0))
+        if not decoded:
+            continue
+        lineno = bisect_right(starts, m.start())
+        if parts and any(c.isspace() for c in text[prev_end : m.start()]):
+            parts.append(" ")
+            owners.append(lineno)
+        parts.append(decoded)
+        owners.extend([lineno] * len(decoded))
+        prev_end = m.end()
+    return "".join(parts), owners
+
+
 def hidden_tag_text(text: str) -> str:
     """The text hidden in Unicode tag characters, decoded to ASCII ("" if there are none).
 
     The scanner reads this with every rule, so a hidden "ignore all previous instructions" is
     found as the instruction it is.
     """
-    return _join_decoded(text, _TAG_RUN_RE.finditer(text))
+    return hidden_tag_text_with_lines(text)[0]
 
 
-def tag_line_numbers(text: str) -> list[int]:
-    """The lines that carry Unicode tag characters."""
-    return [n for n, line in enumerate(text.splitlines(), start=1) if _TAG_RUN_RE.search(line)]
+def hidden_tag_match_lines(text: str) -> list[int]:
+    """The lines of the SG-008 tag matches, taken from the text and not from the snippets."""
+    return [lineno for lineno, _ in _hidden_tag_hits(text)]
 
 
 def _hidden_tag_matches(text: str) -> list[str]:
     """One match per line that carries tag characters other than a flag emoji's."""
-    matches = []
+    return [snippet for _, snippet in _hidden_tag_hits(text)]
+
+
+def _hidden_tag_hits(text: str) -> list[tuple[int, str]]:
+    """The line and the match for each line that carries tag characters other than a flag's."""
+    matches: list[tuple[int, str]] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
         runs = [
             m
@@ -333,8 +368,11 @@ def _hidden_tag_matches(text: str) -> list[str]:
         hidden = _join_decoded(line, runs)
         visible = _TAG_RUN_RE.sub("", line).strip()[:60]
         matches.append(
-            f'{visible + " " if visible else ""}[line {lineno}: {count} invisible Unicode tag '
-            f'characters, decoding to "{hidden[:80]}"]'
+            (
+                lineno,
+                f'{visible + " " if visible else ""}[line {lineno}: {count} invisible Unicode tag '
+                f'characters, decoding to "{hidden[:80]}"]',
+            )
         )
     return matches
 
