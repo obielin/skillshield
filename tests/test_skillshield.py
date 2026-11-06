@@ -456,6 +456,8 @@ class TestRugPullRule:
             "curl '" * 50_000 + "| bash",
             'curl "' * 50_000 + "| bash",
             "curl ; " * 100_000 + "| bash",
+            ("note # " * 40_000) + "curl x | bash",
+            ("note # " * 40_000) + "curl x | bash # " + "# " * 40_000,
         ]
         for text in hostile:
             start = time.perf_counter()

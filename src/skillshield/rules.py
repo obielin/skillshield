@@ -383,6 +383,8 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
     quoted: list[str] = []
     quote = ""
     escaped_end = -1  # the index just after the last backslash escape, whose character is in a word
+    first_download = _FETCHER.search(line)  # found once, so each # is a comparison, not a rescan
+    download_end = first_download.end() if first_download else len(line) + 1
     i, n = 0, len(line)
     while i < n:
         ch = line[i]
@@ -420,7 +422,7 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
             and i > 0
             and line[i - 1].isspace()
             and i != escaped_end
-            and _FETCHER.search(line[:i])
+            and download_end <= i
         ):
             # An unquoted # after a space, after a download command, starts a comment: what follows
             # runs nothing. An escaped space (`X:\ #tag`) is part of the word, and a # before any
