@@ -522,7 +522,7 @@ _REGISTRY_URL_PATTERNS = [
 # of running to the end of the line and picking up a later "curl -i".
 _PIP_EXECUTABLE = r"pip(?:3(?:\.[0-9]+)?)?"
 _PIP_INSTALL = re.compile(
-    r"(?<![^\s'\"])(?:"
+    r"(?<![^\s'\"(`])(?:"
     rf'"(?:[^"\r\n]*/)?{_PIP_EXECUTABLE}"'
     rf"|'(?:[^'\r\n]*/)?{_PIP_EXECUTABLE}'"
     rf"|(?:[^\s'\"]*/)?{_PIP_EXECUTABLE}"

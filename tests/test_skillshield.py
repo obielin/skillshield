@@ -420,6 +420,17 @@ class TestPackageRegistryRule:
         assert len(hits) == 5_000
         assert elapsed < 2.0
 
+    @pytest.mark.parametrize("wrapper", ["({})", "`{}`", "$({})"])
+    def test_pip_short_index_in_shell_wrappers(self, wrapper):
+        command = "pip install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(wrapper.format(command)) != []
+
+    @pytest.mark.parametrize("wrapper", ["({})", "`{}`", "$({})"])
+    def test_shell_wrapper_trusted_registry_passes(self, wrapper, monkeypatch):
+        monkeypatch.setattr("skillshield.rules._OFFICIAL_REGISTRY_HOSTS", {"example.com"})
+        command = "pip install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(wrapper.format(command)) == []
+
     def test_colon_heavy_non_pip_path_is_fast(self):
         import time
 
