@@ -520,7 +520,15 @@ _REGISTRY_URL_PATTERNS = [
 # pip install command; "curl -i" and "grep -i" take the same flag and are
 # clean. A shell separator ends the command, so the scan stops there instead
 # of running to the end of the line and picking up a later "curl -i".
-_PIP_INSTALL = re.compile(r"\bpip(?:3(?:\.[0-9]+)?)?[ \t]+install\b", re.IGNORECASE)
+_PIP_EXECUTABLE = r"pip(?:3(?:\.[0-9]+)?)?"
+_PIP_INSTALL = re.compile(
+    r"(?<![^\s'\"])(?:"
+    rf'"(?:[^"\r\n]*/)?{_PIP_EXECUTABLE}"'
+    rf"|'(?:[^'\r\n]*/)?{_PIP_EXECUTABLE}'"
+    rf"|(?:[^\s'\"]*/)?{_PIP_EXECUTABLE}"
+    r")[ \t]+install\b",
+    re.IGNORECASE,
+)
 _PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`]+)")
 _SHELL_SEPARATORS = ";|&\n"
 
