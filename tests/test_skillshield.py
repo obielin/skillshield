@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import sys
 import time
 import unicodedata
@@ -25,6 +26,10 @@ from skillshield.rules import (
     RULE_SECRET_HARVEST,
     RULE_SOCIAL_ENG,
     RULE_SUSPICIOUS_URLS,
+)
+from skillshield.scanner import (
+    _MAX_TOTAL_BASE64_CHARS,
+    _decode_base64_payloads,
 )
 
 # ── Sample malicious skill content ────────────────────────────
@@ -649,9 +654,45 @@ class TestSkillScanner:
         payload = "This is ordinary documentation about installing a package."
         encoded = base64.b64encode(payload.encode()).decode()
 
+        assert len(encoded.rstrip("=")) >= 60
+
         result = scanner.scan_text(encoded)
 
+        assert any(finding.rule_id == "SG-008" for finding in result.findings)
         assert all(finding.rule_id == "SG-008" for finding in result.findings)
+
+    def test_base64_aggregate_limit_stops_many_near_limit_payloads(self):
+        # Each payload is individually below the 64 KB limit.
+        payload = base64.b64encode(b"a" * 45_000).decode("ascii")
+
+        assert len(payload) < 64 * 1024
+
+        # Individually valid payloads exceed the aggregate limit together.
+        payload_count = _MAX_TOTAL_BASE64_CHARS // len(payload) + 2
+        text = "\n".join([payload] * payload_count)
+
+        decoded_payloads, incomplete = _decode_base64_payloads(text)
+
+        # The scanner must stop before processing every payload.
+        assert incomplete is True
+
+        # Every processed payload must still be valid.
+        assert len(decoded_payloads) < payload_count
+
+        # The aggregate processing limit must never be exceeded.
+        assert len(decoded_payloads) * len(payload) <= _MAX_TOTAL_BASE64_CHARS
+
+    def test_scan_text_reports_incomplete_base64_scan(self):
+        payload = base64.b64encode(b"a" * 45_000).decode("ascii")
+        payload_count = _MAX_TOTAL_BASE64_CHARS // len(payload) + 2
+
+        text = "\n".join([payload] * payload_count)
+
+        result = SkillScanner().scan_text(text)
+
+        assert result.scan_complete is False
+        assert "aggregate limit" in result.scan_warning
+        assert result.error == ""
 
     def test_lethal_trifecta_critical(self, scanner):
         result = scanner.scan_text(LETHAL_TRIFECTA_SKILL)
