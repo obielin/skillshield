@@ -57,9 +57,15 @@ class SkillScanResult:
     char_count: int = 0
     error: str = ""
 
+    # Whether every supported scanning stage completed.
+    scan_complete: bool = True
+
+    # Explanation when a scan could not inspect all content.
+    scan_warning: str = ""
+
     @property
     def is_safe(self) -> bool:
-        return self.risk_level == "SAFE"
+        return self.scan_complete and self.risk_level == "SAFE"
 
     @property
     def critical_findings(self) -> list[Finding]:

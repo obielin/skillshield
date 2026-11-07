@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import importlib.util
+import re
 import sys
 import time
+from bisect import bisect_right
 from pathlib import Path
 from typing import Callable
 
@@ -122,6 +126,70 @@ def _find_line_numbers(text: str, snippet: str) -> list[int]:
     return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]
 
 
+_BASE64_RE = re.compile(r"[A-Za-z0-9+/]{60,}={0,2}")
+# Maximum size of one Base64 payload.
+_MAX_BASE64_CHARS = 64 * 1024
+# Maximum combined size of Base64 candidates processed in one scan.
+# This prevents many individually valid payloads from exhausting CPU time.
+_MAX_TOTAL_BASE64_CHARS = 1024 * 1024
+
+_MIN_PRINTABLE_RATIO = 0.85
+
+
+def _decode_base64_payloads(text: str) -> tuple[list[tuple[str, int]], bool]:
+    """Decode bounded Base64 runs containing mostly printable UTF-8 text.
+
+     Both individual and aggregate limits are enforced to prevent excessive
+    decoding and regex-matching work.
+
+    Returns:
+        A tuple containing:
+        - Successfully decoded printable payloads and their source lines.
+        - Whether scanning stopped because the aggregate limit was reached.
+    """
+    decoded_payloads = []
+    total_encoded_chars = 0
+    incomplete = False
+
+    # Calculate newline positions once for efficient line-number lookup.
+    newline_positions = [i for i, char in enumerate(text) if char == "\n"]
+
+    for match in _BASE64_RE.finditer(text):
+        encoded = match.group(0)
+
+        # Preserve the existing per-payload limit
+        if len(encoded) > _MAX_BASE64_CHARS:
+            continue
+
+        # Enforce the aggregate limit before decoding another payload.
+        if total_encoded_chars + len(encoded) > _MAX_TOTAL_BASE64_CHARS:
+            incomplete = True
+            break
+
+        total_encoded_chars += len(encoded)
+
+        try:
+            decoded_bytes = base64.b64decode(
+                encoded + "=" * (-len(encoded) % 4),
+                validate=True,
+            )
+            decoded = decoded_bytes.decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            continue
+
+        if not decoded:
+            continue
+
+        printable_count = sum(char.isprintable() or char in "\r\n\t" for char in decoded)
+        printable_ratio = printable_count / len(decoded)
+
+        if printable_ratio >= _MIN_PRINTABLE_RATIO:
+            line_number = bisect_right(newline_positions, match.start()) + 1
+            decoded_payloads.append((decoded, line_number))
+
+    return decoded_payloads, incomplete
+
+
 class SkillScanner:
     """
     Scan AI agent skills for security vulnerabilities.
@@ -177,6 +245,7 @@ class SkillScanner:
         t0 = time.time()
         findings: list[Finding] = []
 
+        # 1. Scan the original text using all configured rules.
         for rule in self.rules:
             if self._below_min_severity(rule.severity):
                 continue
@@ -184,10 +253,60 @@ class SkillScanner:
                 snippets = rule.match(text)
             except Exception:
                 snippets = []
+
             if snippets:
                 line_numbers = _find_line_numbers(text, snippets[0])
-                findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
+                findings.append(
+                    Finding(
+                        rule=rule,
+                        snippets=snippets,
+                        line_numbers=line_numbers,
+                    )
+                )
 
+        # Check whether SG-008 obfuscation scanning is enabled.
+        # Decoding must still happen even if SG-008 is below the reporting severity threshold.
+        obfuscation_enabled = any(rule.id == "SG-008" for rule in self.rules)
+
+        # Track whether every scanning stage completed.
+        scan_complete = True
+        scan_warning = ""
+
+        if obfuscation_enabled:
+            decoded_payloads, incomplete = _decode_base64_payloads(text)
+
+            # Scan decoded content once without recursively decoding it.
+            for decoded_text, source_line in decoded_payloads:
+                for rule in self.rules:
+
+                    if rule.id == "SG-008":
+                        continue
+
+                    if self._below_min_severity(rule.severity):
+                        continue
+
+                    try:
+                        snippets = rule.match(decoded_text)
+                    except Exception:
+                        snippets = []
+
+                    if snippets:
+                        findings.append(
+                            Finding(
+                                rule=rule,
+                                snippets=[f"[decoded base64] {snippet}" for snippet in snippets],
+                                line_numbers=[source_line],
+                            )
+                        )
+
+            # Report incomplete scanning if the aggregate limit was reached.
+            if incomplete:
+                scan_complete = False
+                scan_warning = (
+                    "Base64 scanning stopped because the aggregate "
+                    f"limit of {_MAX_TOTAL_BASE64_CHARS} characters "
+                    "was reached. Some payloads were not inspected."
+                )
         score = _compute_risk_score(findings)
         level = _risk_level(score, findings)
 
@@ -199,6 +318,8 @@ class SkillScanner:
             scan_time_ms=round((time.time() - t0) * 1000, 2),
             line_count=text.count("\n") + 1,
             char_count=len(text),
+            scan_complete=scan_complete,
+            scan_warning=scan_warning,
         )
 
     def scan_file(self, path: str | Path, encoding: str = "utf-8") -> SkillScanResult:
