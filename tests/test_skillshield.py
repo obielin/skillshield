@@ -420,6 +420,14 @@ class TestPackageRegistryRule:
         assert len(hits) == 5_000
         assert elapsed < 2.0
 
+    def test_colon_heavy_non_pip_path_is_fast(self):
+        import time
+
+        text = "a:" * 20_000 + "/notpip install -i https://example.com/simple"
+        start = time.perf_counter()
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+        assert time.perf_counter() - start < 1.0
+
     @pytest.mark.parametrize(
         "executable",
         ['"/usr/bin/pip3.12"', "'/usr/bin/pip3'", '"/opt/my env/bin/pip"'],
