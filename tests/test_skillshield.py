@@ -431,6 +431,17 @@ class TestPackageRegistryRule:
         command = "pip install -i https://example.com/simple pkg"
         assert RULE_PACKAGE_REGISTRY.match(wrapper.format(command)) == []
 
+    def test_parenthesis_heavy_non_pip_path_is_fast(self):
+        text = "(" * 20_000 + "/notpip install -i https://example.com/simple"
+        start = time.perf_counter()
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+        assert time.perf_counter() - start < 1.0
+
+    @pytest.mark.parametrize("separator", [";", "|", "&"])
+    def test_separator_inside_quoted_pip_path(self, separator):
+        text = f'"/opt/a{separator}b/bin/pip" install -i https://example.com/simple pkg'
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
     def test_colon_heavy_non_pip_path_is_fast(self):
         import time
 

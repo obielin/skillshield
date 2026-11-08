@@ -525,7 +525,7 @@ _PIP_INSTALL = re.compile(
     r"(?<![^\s'\"(`])(?:"
     rf'"(?:[^"\r\n]*/)?{_PIP_EXECUTABLE}"'
     rf"|'(?:[^'\r\n]*/)?{_PIP_EXECUTABLE}'"
-    rf"|(?:[^\s'\"]*/)?{_PIP_EXECUTABLE}"
+    rf"|(?:[^\s'\"(`]*/)?{_PIP_EXECUTABLE}"
     r")[ \t]+install\b",
     re.IGNORECASE,
 )
@@ -540,7 +540,22 @@ def _pip_short_flag_matches(text: str) -> list[tuple[str, str]]:
     # "pip install" tokens is still scanned in linear time.
     for line in text.splitlines(keepends=True):
         start = 0
+        quote = None
+        escaped = False
         for index, char in enumerate(line):
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\" and quote != "'":
+                escaped = True
+                continue
+            if quote:
+                if char == quote:
+                    quote = None
+                continue
+            if char in "'\"":
+                quote = char
+                continue
             if char not in _SHELL_SEPARATORS:
                 continue
             matches.extend(_command_pip_short_flag_matches(line[start:index]))
