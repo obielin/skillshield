@@ -431,6 +431,14 @@ class TestPackageRegistryRule:
         command = "pip install -i https://example.com/simple pkg"
         assert RULE_PACKAGE_REGISTRY.match(wrapper.format(command)) == []
 
+    def test_double_quoted_substitution_keeps_command_boundaries(self):
+        text = 'echo "$(pip install requests; curl -i https://api.example.com/health)"'
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    def test_double_quoted_substitution_still_detects_pip_override(self):
+        text = 'echo "$(pip install -i https://example.com/simple pkg; echo done)"'
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
     def test_parenthesis_heavy_non_pip_path_is_fast(self):
         text = "(" * 20_000 + "/notpip install -i https://example.com/simple"
         start = time.perf_counter()

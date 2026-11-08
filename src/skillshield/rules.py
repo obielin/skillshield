@@ -542,6 +542,8 @@ def _pip_short_flag_matches(text: str) -> list[tuple[str, str]]:
         start = 0
         quote = None
         escaped = False
+        substitutions = []
+        substitution_open = False
         for index, char in enumerate(line):
             if escaped:
                 escaped = False
@@ -549,6 +551,22 @@ def _pip_short_flag_matches(text: str) -> list[tuple[str, str]]:
             if char == "\\" and quote != "'":
                 escaped = True
                 continue
+            if substitution_open:
+                substitution_open = False
+                continue
+            if quote != "'" and char == "$" and line[index + 1 : index + 2] == "(":
+                substitutions.append([1, quote])
+                quote = None
+                substitution_open = True
+                continue
+            if not quote and substitutions:
+                if char == "(":
+                    substitutions[-1][0] += 1
+                elif char == ")":
+                    substitutions[-1][0] -= 1
+                    if substitutions[-1][0] == 0:
+                        quote = substitutions.pop()[1]
+                        continue
             if quote:
                 if char == quote:
                     quote = None
