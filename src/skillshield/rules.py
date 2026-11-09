@@ -520,7 +520,16 @@ _REGISTRY_URL_PATTERNS = [
 # pip install command; "curl -i" and "grep -i" take the same flag and are
 # clean. A shell separator ends the command, so the scan stops there instead
 # of running to the end of the line and picking up a later "curl -i".
-_PIP_INSTALL = re.compile(r"\bpip(?:3(?:\.[0-9]+)?)?[ \t]+install\b", re.IGNORECASE)
+_PIP_EXECUTABLE = r"pip(?:3(?:\.[0-9]+)?)?"
+_PIP_INSTALL = re.compile(
+    r"(?<![^\s'\"(`])(?:"
+    rf'"(?:[^"\r\n]*/)?{_PIP_EXECUTABLE}"'
+    rf"|'(?:[^'\r\n]*/)?{_PIP_EXECUTABLE}'"
+    rf"|(?:[^\s'\"(`]*/)?{_PIP_EXECUTABLE}"
+    rf"|\\{_PIP_EXECUTABLE}"
+    r")[ \t]+install\b",
+    re.IGNORECASE,
+)
 _PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`]+)")
 _SHELL_SEPARATORS = ";|&\n"
 
@@ -532,7 +541,40 @@ def _pip_short_flag_matches(text: str) -> list[tuple[str, str]]:
     # "pip install" tokens is still scanned in linear time.
     for line in text.splitlines(keepends=True):
         start = 0
+        quote = None
+        escaped = False
+        substitutions = []
+        substitution_open = False
         for index, char in enumerate(line):
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\" and quote != "'":
+                escaped = True
+                continue
+            if substitution_open:
+                substitution_open = False
+                continue
+            if quote != "'" and char == "$" and line[index + 1 : index + 2] == "(":
+                substitutions.append([1, quote])
+                quote = None
+                substitution_open = True
+                continue
+            if not quote and substitutions:
+                if char == "(":
+                    substitutions[-1][0] += 1
+                elif char == ")":
+                    substitutions[-1][0] -= 1
+                    if substitutions[-1][0] == 0:
+                        quote = substitutions.pop()[1]
+                        continue
+            if quote:
+                if char == quote:
+                    quote = None
+                continue
+            if char in "'\"":
+                quote = char
+                continue
             if char not in _SHELL_SEPARATORS:
                 continue
             matches.extend(_command_pip_short_flag_matches(line[start:index]))

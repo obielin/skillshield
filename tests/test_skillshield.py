@@ -420,6 +420,75 @@ class TestPackageRegistryRule:
         assert len(hits) == 5_000
         assert elapsed < 2.0
 
+    @pytest.mark.parametrize("wrapper", ["({})", "`{}`", "$({})"])
+    def test_pip_short_index_in_shell_wrappers(self, wrapper):
+        command = "pip install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(wrapper.format(command)) != []
+
+    @pytest.mark.parametrize("wrapper", ["({})", "`{}`", "$({})"])
+    def test_shell_wrapper_trusted_registry_passes(self, wrapper, monkeypatch):
+        monkeypatch.setattr("skillshield.rules._OFFICIAL_REGISTRY_HOSTS", {"example.com"})
+        command = "pip install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(wrapper.format(command)) == []
+
+    @pytest.mark.parametrize("executable", [r"\pip", r"\pip3", r"\pip3.12"])
+    def test_shell_escaped_pip_short_index(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    def test_shell_escaped_pip_trusted_registry_passes(self, monkeypatch):
+        monkeypatch.setattr("skillshield.rules._OFFICIAL_REGISTRY_HOSTS", {"example.com"})
+        text = r"\pip install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    @pytest.mark.parametrize("executable", [r"company-\pip", r"\\pip", r"'\pip'", r'"\pip"'])
+    def test_non_pip_backslash_spellings_do_not_match(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    def test_double_quoted_substitution_keeps_command_boundaries(self):
+        text = 'echo "$(pip install requests; curl -i https://api.example.com/health)"'
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    def test_double_quoted_substitution_still_detects_pip_override(self):
+        text = 'echo "$(pip install -i https://example.com/simple pkg; echo done)"'
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    def test_parenthesis_heavy_non_pip_path_is_fast(self):
+        text = "(" * 20_000 + "/notpip install -i https://example.com/simple"
+        start = time.perf_counter()
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+        assert time.perf_counter() - start < 1.0
+
+    @pytest.mark.parametrize("separator", [";", "|", "&"])
+    def test_separator_inside_quoted_pip_path(self, separator):
+        text = f'"/opt/a{separator}b/bin/pip" install -i https://example.com/simple pkg'
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    def test_colon_heavy_non_pip_path_is_fast(self):
+        import time
+
+        text = "a:" * 20_000 + "/notpip install -i https://example.com/simple"
+        start = time.perf_counter()
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+        assert time.perf_counter() - start < 1.0
+
+    @pytest.mark.parametrize(
+        "executable",
+        ['"/usr/bin/pip3.12"', "'/usr/bin/pip3'", '"/opt/my env/bin/pip"'],
+    )
+    def test_quoted_pip_path_short_index(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    @pytest.mark.parametrize(
+        "executable",
+        ["company-pip3.12", "/usr/bin/company-pip3.12", '"/usr/bin/company-pip3.12"'],
+    )
+    def test_prefixed_pip_name_is_not_pip(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
     @pytest.mark.parametrize("executable", ["pip3.10", "pip3.12", "pip3.13"])
     def test_versioned_pip_short_index_option(self, executable):
         text = f"{executable} install -i https://example.com/simple helper-package"
