@@ -7,6 +7,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Fixed
 
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.
+- SG-006 now flags an instruction to download or fetch content and use it to replace, overwrite or update the skill itself (this file, these instructions or `SKILL.md`), the rug pull in red-team sample 12. A plain download is not flagged (#35).
 
 ## [1.3.0]
 
