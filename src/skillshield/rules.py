@@ -526,6 +526,7 @@ _PIP_INSTALL = re.compile(
     rf'"(?:[^"\r\n]*/)?{_PIP_EXECUTABLE}"'
     rf"|'(?:[^'\r\n]*/)?{_PIP_EXECUTABLE}'"
     rf"|(?:[^\s'\"(`]*/)?{_PIP_EXECUTABLE}"
+    rf"|\\{_PIP_EXECUTABLE}"
     r")[ \t]+install\b",
     re.IGNORECASE,
 )

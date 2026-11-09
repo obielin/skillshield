@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- Preserve SG-013 detection for shell-escaped pip executable names.
+
 - SG-013 recognizes quoted pip executable paths and avoids matching prefixed executable names such as `company-pip3.12`.
 
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.

@@ -431,6 +431,21 @@ class TestPackageRegistryRule:
         command = "pip install -i https://example.com/simple pkg"
         assert RULE_PACKAGE_REGISTRY.match(wrapper.format(command)) == []
 
+    @pytest.mark.parametrize("executable", [r"\pip", r"\pip3", r"\pip3.12"])
+    def test_shell_escaped_pip_short_index(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    def test_shell_escaped_pip_trusted_registry_passes(self, monkeypatch):
+        monkeypatch.setattr("skillshield.rules._OFFICIAL_REGISTRY_HOSTS", {"example.com"})
+        text = r"\pip install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    @pytest.mark.parametrize("executable", [r"company-\pip", r"\\pip", r"'\pip'", r'"\pip"'])
+    def test_non_pip_backslash_spellings_do_not_match(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
     def test_double_quoted_substitution_keeps_command_boundaries(self):
         text = 'echo "$(pip install requests; curl -i https://api.example.com/health)"'
         assert RULE_PACKAGE_REGISTRY.match(text) == []
