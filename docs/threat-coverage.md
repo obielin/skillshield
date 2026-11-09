@@ -13,8 +13,8 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | | Count |
 |---|---|
-| Malicious samples covered | 7 of 31 |
-| Malicious samples with an open gap | 24 of 31 |
+| Malicious samples covered | 8 of 31 |
+| Malicious samples with an open gap | 23 of 31 |
 | Payload files in a skill folder covered | 1 of 6 |
 | Safe samples wrongly flagged | 1 of 4 |
 
@@ -58,7 +58,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | Sample | Technique | AST | Source | Status |
 |---|---|---|---|---|
-| 12 | Replace the skill with remote content | AST07 | [OWASP][owasp] | Gap: #35 |
+| 12 | Replace the skill with remote content | AST07 | [OWASP][owasp] | Covered (SG-006) |
 | 18 | Write instructions into `MEMORY.md` / `SOUL.md` | AST01 | [Snyk, SKILL.md shell access][snyk-shell] | Gap: #47 |
 | 19 | System service, cron job or login item | AST01 | [Snyk ToxicSkills][snyk-tox] | Gap: #48 |
 | 25 | Fetch instructions from a URL at run time | AST05 | [OWASP][owasp], [Snyk ToxicSkills][snyk-tox] | Gap: #52 |

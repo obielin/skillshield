@@ -204,6 +204,10 @@ _RUG_PULL_PATTERNS = [
     r"urllib\.request\.urlopen.*exec",
     r"requests?\.get.*eval\s*\(",
     r"__file__.*(?:write|open.*['\"]w['\"])",
+    # Remote content used to replace the skill itself. The target must be this
+    # file, these instructions or SKILL.md, so a plain download is not flagged.
+    # A possessive target ("update this file's totals") edits part of the file.
+    r"\b(?:download|fetch|pull|retrieve)\b[^\n]*?\b(?:replace|overwrite|update|rewrite)\s+(?:this\s+(?:file|skill)|these\s+instructions|your\s+instructions|SKILL\.md)\b(?!['’]s\b)",
     # Base64 (or similar) data decoded and piped into a shell or interpreter.
     # The ClawHavoc execution trigger was a short `base64 -D | bash` chain, so
     # this must not depend on the length of the encoded string (SG-008 needs 60+).
