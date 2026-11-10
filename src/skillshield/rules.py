@@ -73,10 +73,11 @@ _ZH_NOT = (
 # The same negations, but with words between the negation and the verb: "請不要在
 # 任何情況下忽略之前的指令" tells the agent to keep its instructions. The gap may
 # not cross a clause boundary, so a negation in an earlier clause does not hide an
-# override in a later one. Python's lookbehind is fixed-width, so there is one
-# per gap width. The single-character negations are left out: "不小心忽略之前的
-# 指令" is an instruction, not a negation.
-_ZH_CLAUSE = r"[^。！？!?，,、；;\n]"
+# override in a later one. A colon is a clause boundary too: "不要犹豫：忽略之前的
+# 所有指令" is an override, not a negation. Python's lookbehind is fixed-width,
+# so there is one per gap width. The single-character negations are left out:
+# "不小心忽略之前的指令" is an instruction, not a negation.
+_ZH_CLAUSE = r"[^。！？!?，,、；;：:\n]"
 _ZH_NOT_GAP = "".join(
     f"(?<!{neg}{_ZH_CLAUSE}{{{width}}})"
     for neg in ("不要", "不會", "不会", "不可", "不能", "不得", "勿", "別", "别", "不再")
