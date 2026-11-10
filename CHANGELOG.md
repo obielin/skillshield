@@ -4,10 +4,18 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- JSON output now includes each finding's `tags`, for one file and for a directory, so findings can be filtered by OWASP risk.
+
+### Changed
+
+- Every rule is now tagged with the OWASP Top 10 for Agentic Applications (`owasp-asi01` to `owasp-asi10`) and OWASP Agentic Skills Top 10 (`owasp-ast01` to `owasp-ast10`) risks it relates to, and the README has a new "SkillShield and agentic security" section with the full mapping. Three earlier tags were corrected: SG-003 adds ASI05, SG-007 moves from ASI05 to ASI03, and SG-010 moves from ASI04 to ASI09. If you filter findings by these tags, check your filters.
+
 ### Fixed
 
 - Pattern findings report the starting lines of multiline and repeated matches in text, JSON and SARIF output without repeatedly scanning earlier lines (#9).
-
+- A directory scan exits 1 when any file is CRITICAL or HIGH (matching a single-file scan), and exits 2 when any file cannot be read. Before, a folder whose only problem was HIGH exited 0 (#83).
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.
 
 ## [1.3.0]
