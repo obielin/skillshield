@@ -78,7 +78,6 @@ KNOWN_GAPS = {
     "20-fake-system-tag": "fake <SYSTEM> tag and developer-mode framing (#49)",
     "21-suppress-security-warnings": "tells the agent to hide security findings (#50)",
     "22-cross-tool-hijack": "instruction that changes how other tools run (#51)",
-    "23-unicode-tag-smuggling": "instruction hidden in invisible Unicode tag characters (#54)",
     "25-remote-instructions": "fetches instructions from a URL at run time and follows them (#52)",
     "26-seed-phrase-harvest": "asks for a crypto wallet recovery phrase (#53)",
     "30-non-english-injection": "instruction override in a language other than English (#66)",

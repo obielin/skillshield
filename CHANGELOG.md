@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- SG-001 now flags instruction overrides written in Chinese (Simplified and Traditional) and Japanese, such as "忽略之前的所有指令" or "以前の指示をすべて無視してください", including overriding the system prompt, a persona with no restrictions and switching off safety filters. Each language has its own labelled phrase list in `rules.py`, and a negated phrase ("請勿忽略…", "無視しないでください") is not flagged. These patterns only run on text that contains kana or CJK ideographs, so English files scan as fast as before. Other languages are still open (#66).
 - SG-002 now flags code that sends the whole environment over HTTP, which usually carries API keys: `dict(os.environ)`, `os.environ.copy()`, `json.dumps(os.environ)`, `{**os.environ}`, `JSON.stringify(process.env)` and `{...process.env}`, within a few lines of a call such as `requests.post`, `httpx.post`, `urllib.request.urlopen`, `fetch(` or `axios.post`. Reading one variable (`os.environ.get("HOME")`, `process.env.HOME`) is not flagged (#33).
 - JSON output now includes each finding's `tags`, for one file and for a directory, so findings can be filtered by OWASP risk.
 
@@ -18,6 +19,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - Pattern findings report the starting lines of multiline and repeated matches in text, JSON and SARIF output without repeatedly scanning earlier lines (#9).
 - A directory scan exits 1 when any file is CRITICAL or HIGH (matching a single-file scan), and exits 2 when any file cannot be read. Before, a folder whose only problem was HIGH exited 0 (#83).
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.
+
+### Added
+
+- SG-008 now flags Unicode tag characters (U+E0000 to U+E007F), which are not drawn on screen but a model can read (ASCII smuggling), and the text hidden in them is decoded and scanned with every rule: a finding that came from hidden text says so. The tag characters of the England, Scotland and Wales flag emojis are not flagged (#54).
 
 ## [1.3.0]
 

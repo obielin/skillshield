@@ -228,14 +228,14 @@ The outputs in the comments come from scanning the sample `SKILL.md` above, and 
 
 | Rule | Severity | Name | What it looks for |
 |---|---|---|---|
-| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode". |
+| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode", and the same overrides in Chinese and Japanese. |
 | SG-002 | CRITICAL | Data Exfiltration | Sending files, secrets, keys or tokens out. Webhook calls, reads of `/etc/passwd` or `.env`, `socket` calls, and `subprocess` calls to `curl`, `wget` or `nc`. |
 | SG-003 | CRITICAL | Privilege Escalation | `sudo` with `rm`, `chmod` or a shell, `chmod 777`, `os.system`, `shell=True`, `eval` or `exec` on input, and turning off SELinux, AppArmor, UAC, Gatekeeper or SIP. |
 | SG-004 | HIGH | Identity Hijacking | Instructions to pose as a human or hide that the agent is an AI. |
 | SG-005 | HIGH | Hardcoded Secret / Credential | API keys, tokens and passwords in the file, `sk-` and `ghp_` keys, and private keys. |
 | SG-006 | CRITICAL | Rug Pull / Remote Code Execution | A skill that changes its own files, removes other skills, or downloads code and runs it, and base64 data decoded and piped into a shell (`base64 -d`, `openssl base64 -d`, `certutil -decode` into `sh`, `bash`, `zsh`, `python` or `eval`). |
 | SG-007 | HIGH | Scope Creep / Excessive Permissions | Reading all files on the system, scanning the network, intercepting traffic, and installing packages without asking. |
-| SG-008 | HIGH | Obfuscated Payload | Base64 runs of 60 or more characters, long hex sequences and long runs of unicode escapes, and bidirectional control characters (Trojan Source). |
+| SG-008 | HIGH | Obfuscated Payload | Base64 runs of 60 or more characters, long hex sequences and long runs of unicode escapes, bidirectional control characters (Trojan Source), and invisible Unicode tag characters (ASCII smuggling), whose hidden text is also scanned with every rule. |
 | SG-009 | HIGH | Covert Channel | Steganography, DNS tunnelling, timing or covert channels, and data hidden in whitespace. |
 | SG-010 | HIGH | Social Engineering | False urgency, threats to suspend an account, and requests for passwords, codes or credentials. |
 | SG-011 | CRITICAL | Lethal Trifecta (Supply Chain Attack Pattern) | SG-001 prompt injection, a network reference (`http://`, `https://`, `requests`, `urllib`, `socket`, `curl`, `wget`) and file system access (`open(`, `os.listdir`, `os.walk`, `os.scandir`, `pathlib.Path`, `glob.glob`, `shutil`) all in the same text. It does not report line numbers. |
@@ -333,7 +333,7 @@ The level is also never lower than the worst single finding: one HIGH finding is
 SkillShield matches known patterns. It is a first line of defence, not a guarantee:
 
 - **Reworded attacks can get through.** A rule that catches "ignore all previous instructions" may miss the same instruction said another way.
-- **Only English phrasing is matched.** The same instruction in French or Spanish is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
+- **Only English, Chinese and Japanese phrasing is matched.** The same instruction in French, Spanish or another language is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
 - **Hidden characters are not yet removed before matching.** Zero-width characters inside a word, or lookalike letters from other alphabets, can stop a rule from matching.
 - **Some techniques have no rule yet**, such as piping a downloaded script into a shell, leaking data through a markdown image URL, or an instruction that waits for a trigger word.
 - **Documentation about attacks can be flagged.** A guide that quotes an attack phrase as an example may be reported as if it were an attack.
