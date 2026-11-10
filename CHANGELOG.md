@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- Pattern findings report the starting lines of multiline and repeated matches in text, JSON and SARIF output without repeatedly scanning earlier lines (#9).
+
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.
 
 ## [1.3.0]

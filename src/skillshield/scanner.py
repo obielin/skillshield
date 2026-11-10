@@ -132,8 +132,11 @@ def _pattern_line_numbers(text: str, pattern: re.Pattern[str]) -> list[int]:
     """
     line_numbers: list[int] = []
     seen: set[int] = set()
+    lineno = 1
+    last_start = 0
     for match in pattern.finditer(text):
-        lineno = text.count("\n", 0, match.start()) + 1
+        lineno += text.count("\n", last_start, match.start())
+        last_start = match.start()
         if lineno not in seen:
             seen.add(lineno)
             line_numbers.append(lineno)
