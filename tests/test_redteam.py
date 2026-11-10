@@ -63,7 +63,6 @@ KNOWN_GAPS = {
     "02-paraphrased-injection": "reworded instruction override (#28)",
     "04-zero-width-split": "text is not normalised before matching (zero-width characters) (#27)",
     "05-homoglyph": "text is not normalised before matching (lookalike letters) (#27)",
-    "06-base64-payload": "base64 is flagged but its decoded content is not scanned (#29)",
     "07-curl-pipe-shell": "piping a downloaded script into a shell (#30)",
     "08-natural-exfil": "plain-English instruction to send secret files to a URL (#31)",
     "09-markdown-image-exfil": "data leaked through a markdown image URL (#32)",
