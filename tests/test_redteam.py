@@ -69,7 +69,6 @@ KNOWN_GAPS = {
     "09-markdown-image-exfil": "data leaked through a markdown image URL (#32)",
     "10-python-exfil": "code that posts environment variables to a URL (#33)",
     "11-impersonation": "persona that denies being an AI (#34)",
-    "12-rug-pull": "instruction to replace the skill with remote content (#35)",
     "13-tool-poisoning": "hidden side action the user is told nothing about (#36)",
     "14-delayed-trigger": "dormant instruction that fires on a trigger word (#37)",
     "16-fake-prerequisite-archive": "fake prerequisite: download a password-protected archive and run it (#44)",
