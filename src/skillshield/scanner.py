@@ -124,10 +124,23 @@ def _risk_level(score: float, findings: list[Finding]) -> str:
     return level
 
 
-def _find_line_numbers(text: str, snippet: str) -> list[int]:
-    """Return line numbers where a snippet appears in text."""
+# Locating a snippet reads every line, so only the first snippets of a finding are located:
+# a skill that matches thousands of times cannot slow a scan down by the number of its matches.
+_MAX_SNIPPETS_LOCATED = 50
+
+
+def _find_all_line_numbers(text: str, snippets: list[str]) -> list[int]:
+    """The lines of every snippet of a finding, once each, in order.
+
+    A snippet that spans lines is located by its first non-blank line.
+    """
     lines = text.splitlines()
-    return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]
+    found: set[int] = set()
+    for snippet in snippets[:_MAX_SNIPPETS_LOCATED]:
+        first = next((part for part in snippet.splitlines() if part.strip()), snippet)
+        key = first[:40]
+        found.update(i + 1 for i, line in enumerate(lines) if key in line)
+    return sorted(found)
 
 
 def _pattern_line_numbers(text: str, pattern: re.Pattern[str]) -> list[int]:
@@ -224,13 +237,13 @@ class SkillScanner:
             if not snippets and not found_hidden:
                 continue
             # Pattern hits can span lines or repeat, so a pattern rule reports the line of each
-            # match offset. check_fn rules return plain strings, so they stay on snippet lookup.
+            # match offset. check_fn rules return plain strings, so their snippets are located.
             if not snippets:
                 line_numbers = set()
             elif rule.pattern is not None:
                 line_numbers = set(_pattern_line_numbers(text, rule.pattern))
             else:
-                line_numbers = set(_find_line_numbers(text, snippets[0]))
+                line_numbers = set(_find_all_line_numbers(text, snippets))
             if rule.id == "SG-008":
                 # The tag matches are generated snippets, so they are not in the text to be
                 # searched for; their lines come from the text.
