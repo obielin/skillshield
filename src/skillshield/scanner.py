@@ -117,10 +117,23 @@ def _risk_level(score: float, findings: list[Finding]) -> str:
     return level
 
 
-def _find_line_numbers(text: str, snippet: str) -> list[int]:
-    """Return line numbers where a snippet appears in text."""
+# Locating a snippet reads every line, so only the first snippets of a finding are located:
+# a skill that matches thousands of times cannot slow a scan down by the number of its matches.
+_MAX_SNIPPETS_LOCATED = 50
+
+
+def _find_all_line_numbers(text: str, snippets: list[str]) -> list[int]:
+    """The lines of every snippet of a finding, once each, in order.
+
+    A snippet that spans lines is located by its first non-blank line.
+    """
     lines = text.splitlines()
-    return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]
+    found: set[int] = set()
+    for snippet in snippets[:_MAX_SNIPPETS_LOCATED]:
+        first = next((part for part in snippet.splitlines() if part.strip()), snippet)
+        key = first[:40]
+        found.update(i + 1 for i, line in enumerate(lines) if key in line)
+    return sorted(found)
 
 
 def _pattern_line_numbers(text: str, pattern: re.Pattern[str]) -> list[int]:
@@ -209,11 +222,11 @@ class SkillScanner:
                 # Pattern hits can span lines or repeat. The match offset is
                 # the line to report; searching for the first snippet misses
                 # a later hit and never finds a snippet that contains a newline.
-                # check_fn rules return plain strings, so they stay on snippet lookup.
+                # check_fn rules return plain strings, so their snippets are located instead.
                 if rule.pattern is not None:
                     line_numbers = _pattern_line_numbers(text, rule.pattern)
                 else:
-                    line_numbers = _find_line_numbers(text, snippets[0])
+                    line_numbers = _find_all_line_numbers(text, snippets)
                 findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
 
         score = _compute_risk_score(findings)
