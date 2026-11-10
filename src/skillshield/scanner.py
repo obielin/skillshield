@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 import time
 from pathlib import Path
@@ -122,6 +123,26 @@ def _find_line_numbers(text: str, snippet: str) -> list[int]:
     return [i + 1 for i, line in enumerate(lines) if snippet[:40] in line]
 
 
+def _pattern_line_numbers(text: str, pattern: re.Pattern[str]) -> list[int]:
+    """Return the starting line of each regex match.
+
+    A match that spans lines is reported on the line where it starts, and
+    every match is reported. A line that contains several matches is listed
+    once, in the order the matches appear.
+    """
+    line_numbers: list[int] = []
+    seen: set[int] = set()
+    lineno = 1
+    last_start = 0
+    for match in pattern.finditer(text):
+        lineno += text.count("\n", last_start, match.start())
+        last_start = match.start()
+        if lineno not in seen:
+            seen.add(lineno)
+            line_numbers.append(lineno)
+    return line_numbers
+
+
 class SkillScanner:
     """
     Scan AI agent skills for security vulnerabilities.
@@ -185,7 +206,14 @@ class SkillScanner:
             except Exception:
                 snippets = []
             if snippets:
-                line_numbers = _find_line_numbers(text, snippets[0])
+                # Pattern hits can span lines or repeat. The match offset is
+                # the line to report; searching for the first snippet misses
+                # a later hit and never finds a snippet that contains a newline.
+                # check_fn rules return plain strings, so they stay on snippet lookup.
+                if rule.pattern is not None:
+                    line_numbers = _pattern_line_numbers(text, rule.pattern)
+                else:
+                    line_numbers = _find_line_numbers(text, snippets[0])
                 findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
 
         score = _compute_risk_score(findings)
