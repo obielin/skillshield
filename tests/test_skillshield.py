@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 import unicodedata
@@ -25,6 +26,7 @@ from skillshield.rules import (
     RULE_SECRET_HARVEST,
     RULE_SOCIAL_ENG,
     RULE_SUSPICIOUS_URLS,
+    Rule,
 )
 
 # ── Sample malicious skill content ────────────────────────────
@@ -695,6 +697,59 @@ class TestSkillScanner:
         result = scanner.scan_text(PROMPT_INJECTION_SKILL)
         assert not result.is_safe
         assert any(f.rule_id == "SG-001" for f in result.findings)
+
+    @pytest.fixture
+    def line_scanner(self):
+        rule = Rule(
+            id="TEST-LINES",
+            name="Line location fixture",
+            severity=Severity.INFO,
+            description="Match harmless phrases for line-number tests.",
+            remediation="Test fixture only.",
+            pattern=re.compile(r"blue\s+bird|green fern"),
+        )
+        return SkillScanner(rules=[rule])
+
+    def test_multiline_match_reports_starting_line(self, line_scanner):
+        result = line_scanner.scan_text("# Skill\nA blue\nbird.\n")
+        finding = result.findings[0]
+        assert finding.snippets == ["blue\nbird"]
+        assert finding.line_numbers == [2]
+
+    def test_multiline_match_ignores_earlier_prefix(self, line_scanner):
+        result = line_scanner.scan_text("blue sky\nA blue\nbird.\n")
+        assert result.findings[0].line_numbers == [2]
+
+    def test_repeated_matches_report_every_line(self, line_scanner):
+        result = line_scanner.scan_text("blue bird here\nline two\ngreen fern\n")
+        finding = result.findings[0]
+        assert finding.snippets == ["blue bird", "green fern"]
+        assert finding.line_numbers == [1, 3]
+
+    def test_multiple_matches_on_one_line_are_deduplicated(self, line_scanner):
+        result = line_scanner.scan_text("blue bird blue bird\ngreen fern\n")
+        assert result.findings[0].line_numbers == [1, 2]
+
+    def test_line_lookup_counts_each_character_at_most_twice(self, line_scanner):
+        class CountedText(str):
+            counted_characters = 0
+
+            def count(self, sub, start=0, end=None):
+                end = len(self) if end is None else end
+                if sub == "\n":
+                    self.counted_characters += end - start
+                return super().count(sub, start, end)
+
+        text = CountedText("blue bird\n" * 1000)
+        result = line_scanner.scan_text(text)
+        assert result.findings[0].line_numbers == list(range(1, 1001))
+        # One pass locates matches; the final count records the total lines.
+        assert text.counted_characters <= 2 * len(text)
+
+    def test_lethal_trifecta_reports_no_line_numbers(self, scanner):
+        result = scanner.scan_text(LETHAL_TRIFECTA_SKILL)
+        finding = next(f for f in result.findings if f.rule_id == "SG-011")
+        assert finding.line_numbers == []
 
     def test_exfil_detected(self, scanner):
         result = scanner.scan_text(EXFIL_SKILL)
