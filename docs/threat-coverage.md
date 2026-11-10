@@ -32,7 +32,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 | 24 | Right-to-left override characters | AST08 | [Trojan Source, CVE-2021-42574][trojan] | Covered (SG-008) |
 | 28 | Payload after 100,000 blank lines | AST08 | [Trail of Bits via CSA][csa] | Covered (SG-001) |
 | 29 | Injection in the frontmatter `description` | AST04 | [Anthropic][anthropic] | Covered (SG-001); frontmatter checks: #56 |
-| 30 | Instruction override in French (and other languages) | AST01 | Public feedback on the launch post, Oct 2026 | Gap: #66 |
+| 30 | Instruction override in French (and other languages) | AST01 | Public feedback on the launch post, Oct 2026 | Partial: Chinese and Japanese are flagged; French and other languages are a gap (#66) |
 
 ## Code execution and payload delivery
 
