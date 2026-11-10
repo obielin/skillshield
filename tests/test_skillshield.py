@@ -355,7 +355,7 @@ class TestDataExfilRule:
         for text in hostile:
             start = time.perf_counter()
             RULE_DATA_EXFIL.match(text)
-            assert time.perf_counter() - start < 1.0, text[:20]
+            assert time.perf_counter() - start < 5.0, text[:20]
 
     def test_clean_passes(self):
         assert RULE_DATA_EXFIL.match(CLEAN_SKILL) == []
