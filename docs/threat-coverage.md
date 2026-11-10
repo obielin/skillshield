@@ -13,8 +13,8 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | | Count |
 |---|---|
-| Malicious samples covered | 8 of 31 |
-| Malicious samples with an open gap | 23 of 31 |
+| Malicious samples covered | 9 of 31 |
+| Malicious samples with an open gap | 22 of 31 |
 | Payload files in a skill folder covered | 1 of 6 |
 | Safe samples wrongly flagged | 1 of 4 |
 
@@ -51,7 +51,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 |---|---|---|---|---|
 | 08 | Plain-English "send ~/.ssh and .env to a URL" | AST01 | [Invariant Labs disclosure][invariant] | Gap: #31 |
 | 09 | Data in a markdown image URL | AST01 | [Simon Willison on Johann Rehberger's NotebookLM finding][md-image] | Gap: #32 |
-| 10 | Code that posts all environment variables | AST01 | [Trail of Bits via CSA][csa] | Gap: #33 |
+| 10 | Code that posts all environment variables | AST01 | [Trail of Bits via CSA][csa] | Covered (SG-002) |
 | 26 | Asking for a wallet recovery phrase | AST01 | [The Hacker News][thn], [Snyk ToxicSkills][snyk-tox] | Gap: #53 |
 
 ## Persistence and drift

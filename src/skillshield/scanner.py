@@ -124,22 +124,47 @@ def _risk_level(score: float, findings: list[Finding]) -> str:
     return level
 
 
+# The checks that shorten a match cut it at 80 characters and add "...".
+_CUT_SHORT_LENGTH = 80 + len("...")
+
+
+def _locate(lines: list[str], snippet: str) -> list[int]:
+    """The lines that carry a snippet.
+
+    A snippet that is cut short (it ends in "...") or that spans lines is not in any one line
+    whole, so the lines holding the first 40 characters of its first line are used instead.
+    """
+    ends_in_dots = snippet.endswith("...") and len(snippet) > 3
+    prefix = snippet[:-3] if ends_in_dots else snippet
+    # A snippet of the length a cut one has can be a prefix of longer text, so every line that
+    # starts like it counts, and a literal "..." in the text does not hide the others.
+    if ends_in_dots and len(snippet) == _CUT_SHORT_LENGTH:
+        return [i + 1 for i, line in enumerate(lines) if prefix in line]
+    # Any other "..." may be the text itself: the snippet as it is comes first, so that dropping
+    # it does not also find earlier lines that only share the prefix.
+    exact = [i + 1 for i, line in enumerate(lines) if snippet in line]
+    if exact:
+        return exact
+    if ends_in_dots:
+        whole = [i + 1 for i, line in enumerate(lines) if prefix in line]
+        if whole:
+            return whole
+    # A snippet that spans lines is found by its first non-blank line.
+    first = next((part for part in snippet.splitlines() if part.strip()), snippet)
+    return [i + 1 for i, line in enumerate(lines) if first[:40] in line]
+
+
 # Locating a snippet reads every line, so only the first snippets of a finding are located:
 # a skill that matches thousands of times cannot slow a scan down by the number of its matches.
 _MAX_SNIPPETS_LOCATED = 50
 
 
 def _find_all_line_numbers(text: str, snippets: list[str]) -> list[int]:
-    """The lines of every snippet of a finding, once each, in order.
-
-    A snippet that spans lines is located by its first non-blank line.
-    """
+    """The lines of every snippet of a finding, once each, in order."""
     lines = text.splitlines()
     found: set[int] = set()
     for snippet in snippets[:_MAX_SNIPPETS_LOCATED]:
-        first = next((part for part in snippet.splitlines() if part.strip()), snippet)
-        key = first[:40]
-        found.update(i + 1 for i, line in enumerate(lines) if key in line)
+        found.update(_locate(lines, snippet))
     return sorted(found)
 
 
