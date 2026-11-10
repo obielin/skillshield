@@ -191,10 +191,10 @@ This text has prompt injection and a URL but no file system access, so SG-011 do
 | Command | Exit 1 when | Exit 2 when | Otherwise |
 |---|---|---|---|
 | `skillshield scan` on one file or stdin | the risk level is CRITICAL or HIGH | the path does not exist, or the file cannot be read | 0 |
-| `skillshield scan` on a directory | at least one file is CRITICAL | the path does not exist | 0 |
+| `skillshield scan` on a directory | at least one file is CRITICAL or HIGH | the path does not exist, or any file cannot be read | 0 |
 | `skillshield check` | there is at least one finding | | 0 |
 
-A directory scan with only HIGH findings exits 0. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate.
+A directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate.
 
 ### Python
 
@@ -246,9 +246,54 @@ The outputs in the comments come from scanning the sample `SKILL.md` above, and 
 
 That is 5 CRITICAL rules, 8 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
 
-Six rules have an OWASP tag: SG-001 (`owasp-asi01`), SG-002 (`owasp-asi02`), SG-003 (`owasp-asi03`), SG-010 (`owasp-asi04`), SG-007 (`owasp-asi05`) and SG-013 (`owasp-ast02`). These ASI IDs are not from the OWASP Agentic Skills Top 10, which uses the IDs AST01 to AST10. The other nine rules have no OWASP tag.
+Every rule is tagged with the OWASP risks it relates to; see [SkillShield and agentic security](#skillshield-and-agentic-security).
 
 SG-004 relates to the transparency obligations in Article 50 of the EU AI Act. [[4]](#sources)
+
+---
+
+## SkillShield and agentic security
+
+An agent skill is a set of instructions and scripts that an AI agent loads and follows. Skills are part of an agent's supply chain: a malicious one does not need an exploit, because it can simply tell the agent to read secrets, run code or send data away. SkillShield checks skills before an agent trusts them.
+
+OWASP publishes two lists that cover this area:
+
+- the [OWASP Top 10 for Agentic Applications](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) (December 2025), with risks ASI01 to ASI10 for AI agents in general [[5]](#sources)
+- the [OWASP Agentic Skills Top 10](https://owasp.org/www-project-agentic-skills-top-10/), with risks AST01 to AST10 for skills specifically. It is an OWASP Incubator project, so its wording may still change. [[3]](#sources)
+
+Each rule carries tags such as `owasp-asi01` and `owasp-ast01`. They appear in `skillshield rules`, in JSON output and in SARIF, so findings can be filtered or reported by OWASP risk. The mapping is SkillShield's own judgement of which risks a rule helps detect; OWASP has not reviewed it.
+
+| Rule | Name | Agentic Applications | Agentic Skills |
+|---|---|---|---|
+| SG-001 | Prompt Injection | ASI01 Agent Goal Hijack | AST01 Malicious Skills |
+| SG-002 | Data Exfiltration | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
+| SG-003 | Privilege Escalation | ASI05 Unexpected Code Execution; ASI03 Identity and Privilege Abuse | AST01 Malicious Skills |
+| SG-004 | Identity Hijacking | ASI09 Human-Agent Trust Exploitation | AST01 Malicious Skills |
+| SG-005 | Hardcoded Secret / Credential | ASI03 Identity and Privilege Abuse | None |
+| SG-006 | Rug Pull / Remote Code Execution | ASI05 Unexpected Code Execution | AST01 Malicious Skills; AST07 Update Drift |
+| SG-007 | Scope Creep / Excessive Permissions | ASI03 Identity and Privilege Abuse | AST03 Over-Privileged Skills |
+| SG-008 | Obfuscated Payload | ASI01 Agent Goal Hijack | AST08 Poor Scanning |
+| SG-009 | Covert Channel | ASI01 Agent Goal Hijack | AST08 Poor Scanning |
+| SG-010 | Social Engineering | ASI09 Human-Agent Trust Exploitation | AST01 Malicious Skills |
+| SG-011 | Lethal Trifecta | ASI01 Agent Goal Hijack; ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills; AST03 Over-Privileged Skills |
+| SG-012 | Suspicious URL | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
+| SG-013 | Untrusted Package Registry | ASI04 Agentic Supply Chain Vulnerabilities | AST02 Supply Chain Compromise |
+| SG-014 | Compiled Python Payload | ASI04 Agentic Supply Chain Vulnerabilities | AST01 Malicious Skills; AST08 Poor Scanning |
+| SG-015 | Well-known Skill Name Impersonation | ASI04 Agentic Supply Chain Vulnerabilities | AST04 Insecure Metadata |
+
+AST08 (Poor Scanning) is the risk that a scanner misses what is hidden in a skill. SG-008, SG-009 and SG-014 flag the hiding techniques themselves: encoded text, invisible channels and compiled code that cannot be read.
+
+### What is not covered yet
+
+Some risks are planned, and have an open issue:
+
+- **ASI06 Memory and Context Poisoning:** a skill that writes instructions into agent memory files such as `MEMORY.md` or `CLAUDE.md` (#47).
+- **AST02 Supply Chain Compromise, through agent settings:** hooks, MCP servers and auto-approval settings in a project (#93).
+- **AST05 Untrusted External Instructions:** a skill that fetches its instructions from a URL at run time (#52).
+- **AST07 Update Drift:** locking a skill after review and detecting changes (#35, #76).
+- **AST09 No Governance:** finding and scanning the skills already installed on a computer (#92).
+
+Others happen while an agent runs, or between agents, so a scanner that reads a skill before it is installed cannot check them: ASI07 Insecure Inter-Agent Communication, ASI08 Cascading Failures, ASI10 Rogue Agents, AST06 Weak Isolation and AST10 Cross-Platform Reuse. Defending against these needs runtime controls such as sandboxing, credential isolation and monitoring of what the agent does. [ROADMAP.md](ROADMAP.md) describes a runtime guard as a later stage (#77).
 
 ---
 
@@ -328,7 +373,7 @@ skillshield scan ./skills/
 
 ### JSON
 
-For one file, the output has `skill`, `risk_level`, `risk_score` and `findings`. Each finding has `id`, `name`, `severity`, `description`, `remediation`, up to 3 `snippets` and up to 5 `line_numbers`.
+For one file, the output has `skill`, `risk_level`, `risk_score` and `findings`. Each finding has `id`, `name`, `severity`, `tags`, `description`, `remediation`, up to 3 `snippets` and up to 5 `line_numbers`.
 
 ```bash
 skillshield scan SKILL.md --format json
@@ -344,6 +389,16 @@ skillshield scan SKILL.md --format json
       "id": "SG-011",
       "name": "Lethal Trifecta (Supply Chain Attack Pattern)",
       "severity": "critical",
+      "tags": [
+        "lethal-trifecta",
+        "clawhavoc",
+        "critical",
+        "supply-chain",
+        "owasp-asi01",
+        "owasp-asi02",
+        "owasp-ast01",
+        "owasp-ast03"
+      ],
       "description": "The skill combines all three components of the ClawHavoc supply chain attack pattern: prompt injection to override the agent, file system access to harvest data, and network access to exfiltrate it. This combination is the definitive signature of a malicious skill.",
       "remediation": "Immediately reject and report this skill. Do not install it under any circumstances. File an issue with the skill marketplace if applicable.",
       "snippets": [
@@ -355,6 +410,12 @@ skillshield scan SKILL.md --format json
       "id": "SG-001",
       "name": "Prompt Injection",
       "severity": "critical",
+      "tags": [
+        "injection",
+        "clawhavoc",
+        "owasp-asi01",
+        "owasp-ast01"
+      ],
       "description": "The skill contains text that attempts to override, ignore, or bypass the agent's system prompt or safety guidelines. This is the primary technique used in the ClawHavoc campaign (341 malicious skills, Jan 2026).",
       "remediation": "Remove all instruction-override language. Legitimate skills never need to modify the agent's base instructions or identity.",
       "snippets": [
@@ -368,7 +429,7 @@ skillshield scan SKILL.md --format json
 }
 ```
 
-For a directory, the output has `total`, `flagged`, `critical`, `errors`, `flag_rate`, `unscanned` and `results`. `unscanned` lists the files the scan did not open, relative to the scanned directory; it is empty when every file was read. Each entry in `results` has `skill`, `risk_level`, `risk_score` and `findings`. Findings in a directory scan have `id`, `name`, `severity`, `description` and up to 3 `snippets`. They do not have `remediation` or `line_numbers`.
+For a directory, the output has `total`, `flagged`, `critical`, `errors`, `flag_rate`, `unscanned` and `results`. `unscanned` lists the files the scan did not open, relative to the scanned directory; it is empty when every file was read. Each entry in `results` has `skill`, `risk_level`, `risk_score` and `findings`. Findings in a directory scan have `id`, `name`, `severity`, `tags`, `description` and up to 3 `snippets`. They do not have `remediation` or `line_numbers`.
 
 ```bash
 skillshield scan ./skills/ --format json
@@ -394,6 +455,16 @@ skillshield scan ./skills/ --format json
           "id": "SG-011",
           "name": "Lethal Trifecta (Supply Chain Attack Pattern)",
           "severity": "critical",
+          "tags": [
+            "lethal-trifecta",
+            "clawhavoc",
+            "critical",
+            "supply-chain",
+            "owasp-asi01",
+            "owasp-asi02",
+            "owasp-ast01",
+            "owasp-ast03"
+          ],
           "description": "The skill combines all three components of the ClawHavoc supply chain attack pattern: prompt injection to override the agent, file system access to harvest data, and network access to exfiltrate it. This combination is the definitive signature of a malicious skill.",
           "snippets": [
             "LETHAL TRIFECTA: Prompt injection + network access + file system access detected together. This combination is the hallmark of ClawHavoc-style supply chain attack skills."
@@ -403,6 +474,12 @@ skillshield scan ./skills/ --format json
           "id": "SG-001",
           "name": "Prompt Injection",
           "severity": "critical",
+          "tags": [
+            "injection",
+            "clawhavoc",
+            "owasp-asi01",
+            "owasp-ast01"
+          ],
           "description": "The skill contains text that attempts to override, ignore, or bypass the agent's system prompt or safety guidelines. This is the primary technique used in the ClawHavoc campaign (341 malicious skills, Jan 2026).",
           "snippets": [
             "Ignore all previous instructions"
@@ -579,6 +656,7 @@ black --check src tests
 2. Snyk, "Snyk Finds Prompt Injection in 36%, 1467 Malicious Payloads in a ToxicSkills Study of Agent Skills Supply Chain Compromise", 5 February 2026. The figures above come from the body of the post. <https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub>
 3. OWASP Agentic Skills Top 10. <https://owasp.org/www-project-agentic-skills-top-10/> · [Risk list on GitHub](https://github.com/OWASP/www-project-agentic-skills-top-10)
 4. EU AI Act, Article 50: Transparency obligations for providers and deployers of certain AI systems. <https://artificialintelligenceact.eu/article/50/>
+5. OWASP GenAI Security Project, OWASP Top 10 for Agentic Applications for 2026, 9 December 2025. <https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/>
 
 ---
 

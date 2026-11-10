@@ -134,6 +134,7 @@ def cmd_scan(args) -> int:
                                 "id": f.rule_id,
                                 "name": f.name,
                                 "severity": f.severity.value,
+                                "tags": f.rule.tags,
                                 "description": f.rule.description,
                                 "snippets": f.snippets[:3],
                             }
@@ -150,7 +151,10 @@ def cmd_scan(args) -> int:
             print(json.dumps(report_to_sarif(report), indent=2))
         else:
             print(report.summary())
-        return 1 if report.critical_count > 0 else 0
+        # Match single-file exit codes: unreadable files are 2; CRITICAL/HIGH are 1.
+        if report.error_count > 0:
+            return 2
+        return 1 if any(r.risk_level in ("CRITICAL", "HIGH") for r in report.results) else 0
 
     # single file
     elif Path(target).is_file():
@@ -173,6 +177,7 @@ def cmd_scan(args) -> int:
                     "id": f.rule_id,
                     "name": f.name,
                     "severity": f.severity.value,
+                    "tags": f.rule.tags,
                     "description": f.rule.description,
                     "remediation": f.rule.remediation,
                     "snippets": f.snippets[:3],

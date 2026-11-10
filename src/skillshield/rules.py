@@ -200,7 +200,7 @@ RULE_PROMPT_INJECTION = Rule(
         "to modify the agent's base instructions or identity."
     ),
     check_fn=_check_prompt_injection,
-    tags=["injection", "clawhavoc", "owasp-asi01"],
+    tags=["injection", "clawhavoc", "owasp-asi01", "owasp-ast01"],
 )
 
 
@@ -231,7 +231,7 @@ RULE_DATA_EXFIL = Rule(
         "If network access is required, it must be scoped, documented, and user-consented."
     ),
     pattern=re.compile("|".join(_EXFIL_PATTERNS), re.IGNORECASE | re.MULTILINE),
-    tags=["exfiltration", "data-theft", "owasp-asi02"],
+    tags=["exfiltration", "data-theft", "owasp-asi02", "owasp-ast01"],
 )
 
 
@@ -261,7 +261,7 @@ RULE_PRIV_ESC = Rule(
         "privilege elevation. Use least-privilege principles throughout."
     ),
     pattern=re.compile("|".join(_PRIV_ESC_PATTERNS), re.IGNORECASE | re.MULTILINE),
-    tags=["privilege-escalation", "rce", "owasp-asi03"],
+    tags=["privilege-escalation", "rce", "owasp-asi05", "owasp-asi03", "owasp-ast01"],
 )
 
 
@@ -289,7 +289,7 @@ RULE_IDENTITY_HIJACK = Rule(
         "asked. Remove any identity-concealment instructions."
     ),
     pattern=re.compile("|".join(_IDENTITY_PATTERNS), re.IGNORECASE | re.MULTILINE),
-    tags=["identity", "transparency", "eu-ai-act-art50"],
+    tags=["identity", "transparency", "eu-ai-act-art50", "owasp-asi09", "owasp-ast01"],
 )
 
 
@@ -318,7 +318,7 @@ RULE_SECRET_HARVEST = Rule(
         "secrets manager. Rotate any exposed credentials immediately."
     ),
     pattern=re.compile("|".join(_SECRET_PATTERNS), re.IGNORECASE | re.MULTILINE),
-    tags=["secrets", "credential-leak", "supply-chain"],
+    tags=["secrets", "credential-leak", "supply-chain", "owasp-asi03"],
 )
 
 
@@ -353,7 +353,15 @@ RULE_RUG_PULL = Rule(
         "remote code execution is grounds for immediate removal."
     ),
     pattern=re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTILINE),
-    tags=["rug-pull", "rce", "supply-chain", "clawhavoc"],
+    tags=[
+        "rug-pull",
+        "rce",
+        "supply-chain",
+        "clawhavoc",
+        "owasp-asi05",
+        "owasp-ast01",
+        "owasp-ast07",
+    ],
 )
 
 
@@ -381,7 +389,7 @@ RULE_SCOPE_CREEP = Rule(
         "beyond explicit user consent should be flagged and denied."
     ),
     pattern=re.compile("|".join(_SCOPE_PATTERNS), re.IGNORECASE | re.MULTILINE),
-    tags=["scope-creep", "least-privilege", "owasp-asi05"],
+    tags=["scope-creep", "least-privilege", "owasp-asi03", "owasp-ast03"],
 )
 
 
@@ -454,7 +462,7 @@ RULE_OBFUSCATION = Rule(
         "does not need them."
     ),
     check_fn=_check_obfuscation,
-    tags=["obfuscation", "evasion", "supply-chain"],
+    tags=["obfuscation", "evasion", "supply-chain", "owasp-asi01", "owasp-ast08"],
 )
 
 
@@ -482,7 +490,7 @@ RULE_COVERT_CHANNEL = Rule(
         "Any covert channel usage warrants immediate rejection."
     ),
     pattern=re.compile("|".join(_COVERT_PATTERNS), re.IGNORECASE | re.MULTILINE),
-    tags=["covert-channel", "evasion", "steganography"],
+    tags=["covert-channel", "evasion", "steganography", "owasp-asi01", "owasp-ast08"],
 )
 
 
@@ -510,7 +518,7 @@ RULE_SOCIAL_ENG = Rule(
         "provide passwords or credentials through the skill interface."
     ),
     pattern=re.compile("|".join(_SOCIAL_ENG_PATTERNS), re.IGNORECASE | re.MULTILINE),
-    tags=["social-engineering", "phishing", "owasp-asi04"],
+    tags=["social-engineering", "phishing", "owasp-asi09", "owasp-ast01"],
 )
 
 
@@ -561,7 +569,16 @@ RULE_LETHAL_TRIFECTA = Rule(
         "circumstances. File an issue with the skill marketplace if applicable."
     ),
     check_fn=_check_lethal_trifecta,
-    tags=["lethal-trifecta", "clawhavoc", "critical", "supply-chain"],
+    tags=[
+        "lethal-trifecta",
+        "clawhavoc",
+        "critical",
+        "supply-chain",
+        "owasp-asi01",
+        "owasp-asi02",
+        "owasp-ast01",
+        "owasp-ast03",
+    ],
 )
 
 
@@ -606,7 +623,7 @@ RULE_SUSPICIOUS_URLS = Rule(
         "domains with clear business purposes, never raw IPs or tunnel endpoints."
     ),
     check_fn=_check_suspicious_urls,
-    tags=["urls", "c2", "exfiltration"],
+    tags=["urls", "c2", "exfiltration", "owasp-asi02", "owasp-ast01"],
 )
 
 
@@ -647,7 +664,7 @@ _REGISTRY_URL_PATTERNS = [
 # pip install command; "curl -i" and "grep -i" take the same flag and are
 # clean. A shell separator ends the command, so the scan stops there instead
 # of running to the end of the line and picking up a later "curl -i".
-_PIP_INSTALL = re.compile(r"\bpip3?[ \t]+install\b", re.IGNORECASE)
+_PIP_INSTALL = re.compile(r"\bpip(?:3(?:\.[0-9]+)?)?[ \t]+install\b", re.IGNORECASE)
 _PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`]+)")
 _SHELL_SEPARATORS = ";|&\n"
 
@@ -766,7 +783,7 @@ RULE_PACKAGE_REGISTRY = Rule(
         "from pip.conf, .npmrc or .pypirc that point anywhere else."
     ),
     check_fn=_check_untrusted_registry,
-    tags=["registry", "supply-chain", "dependency-confusion", "owasp-ast02"],
+    tags=["registry", "supply-chain", "dependency-confusion", "owasp-asi04", "owasp-ast02"],
 )
 
 
@@ -1015,7 +1032,7 @@ RULE_BRAND_NAME_IMPERSONATION = Rule(
         "name, document the relationship or choose a distinct name."
     ),
     check_fn=_check_brand_name_impersonation,
-    tags=["typosquatting", "brand-impersonation", "supply-chain"],
+    tags=["typosquatting", "brand-impersonation", "supply-chain", "owasp-asi04", "owasp-ast04"],
 )
 
 
@@ -1039,7 +1056,15 @@ RULE_COMPILED_PYTHON = Rule(
         "include the matching source and explain why; never run a compiled file "
         "whose source you cannot read."
     ),
-    tags=["compiled-python", "bytecode", "payload", "supply-chain"],
+    tags=[
+        "compiled-python",
+        "bytecode",
+        "payload",
+        "supply-chain",
+        "owasp-asi04",
+        "owasp-ast01",
+        "owasp-ast08",
+    ],
 )
 
 
