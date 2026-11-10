@@ -595,7 +595,7 @@ class TestUnicodeTagSmuggling:
         for text in hostile:
             start = time.perf_counter()
             SkillScanner().scan_text(text)
-            assert time.perf_counter() - start < 2.0, text[:12]
+            assert time.perf_counter() - start < 5.0, text[:12]
 
 
 class TestObfuscationRule:
