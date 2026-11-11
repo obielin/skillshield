@@ -39,6 +39,7 @@ _LEVEL_RANK = {"SAFE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
 # Skill file extensions supported
 SKILL_EXTENSIONS = {
+    ".mdc",
     ".md",
     ".txt",
     ".yaml",
@@ -53,6 +54,23 @@ SKILL_EXTENSIONS = {
     ".xml",
     ".html",
 }
+
+# Extensionless instruction files read by coding agents.
+_AGENT_RULE_FILENAMES = {".cursorrules", ".windsurfrules", ".clinerules", ".roorules", ".rules"}
+
+
+def _is_agent_rule_file(path: Path) -> bool:
+    if path.name in _AGENT_RULE_FILENAMES or path.name.startswith(".roorules-"):
+        return True
+    return any(
+        parent.name == ".clinerules"
+        or (
+            parent.parent.name == ".roo"
+            and (parent.name == "rules" or parent.name.startswith("rules-"))
+        )
+        for parent in path.parents
+    )
+
 
 # Compiled Python that Python runs directly but a text scanner cannot read.
 COMPILED_PYTHON_EXTENSIONS = {".pyc", ".pyo"}
@@ -387,8 +405,9 @@ class SkillScanner:
         base = Path(directory)
         glob = base.rglob("*") if recursive else base.glob("*")
         all_files = [p for p in sorted(glob) if p.is_file()]
-        paths = [p for p in all_files if p.suffix.lower() in exts]
-        # A compiled file asked for through extensions already reaches
+        paths = [p for p in all_files if p.suffix.lower() in exts or _is_agent_rule_file(p)]
+        selected_paths = set(paths)
+        # A compiled file selected above already reaches
         # scan_file, which dispatches to the compiled check; collecting it
         # here as well would report the same file twice. Compiled Python is
         # never filtered by directory name: a submitted skill can hide
@@ -396,7 +415,7 @@ class SkillScanner:
         compiled = [
             p
             for p in all_files
-            if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS and p.suffix.lower() not in exts
+            if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS and p not in selected_paths
         ]
 
         selected = set(paths) | set(compiled)
