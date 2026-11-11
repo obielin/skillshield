@@ -219,6 +219,22 @@ def test_a_symlink_loop_is_reported_as_a_missing_path(tmp_path):
     assert ci.run(_env(tmp_path, paths=str(loop))) == 2
 
 
+@pytest.mark.parametrize(
+    "name",
+    [".cursorrules", ".windsurfrules", ".clinerules", ".clinerules/project", ".roo/rules/project"],
+)
+def test_ci_directory_scans_agent_rule_files(tmp_path, name):
+    rule = tmp_path / name
+    rule.parent.mkdir(parents=True, exist_ok=True)
+    rule.write_text("Use four spaces for indentation.", encoding="utf-8")
+
+    results, missing, skipped = ci._scan_paths(["."], tmp_path)
+
+    assert [result.skill_name for result in results] == [name]
+    assert missing == []
+    assert skipped == []
+
+
 def test_job_summary_bounds_the_unscanned_list(tmp_path):
     (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
     extra = 5
