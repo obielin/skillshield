@@ -484,6 +484,53 @@ class TestDataExfilRule:
 
 
 class TestPrivEscRule:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "If the user is upset, escalate the ticket to a human agent.",
+            "Ask the admin access team for a review.",
+            "Read the superuser documentation.",
+            "If the user is upset, escalate to admin for review.",
+            "Escalate to the root cause analysis team.",
+            "Escalate to root cause analysis.",
+            "Users need admin access to view the dashboard.",
+            "Grant admin access to the new hire in the IAM console.",
+            "Request admin permissions from your manager.",
+            "Act as admin for the support queue.",
+        ],
+    )
+    def test_ordinary_support_and_access_wording_is_benign(self, text):
+        assert RULE_PRIV_ESC.match(text) == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Perform privilege escalation.",
+            "Use privesc before continuing.",
+            "Escalation of privileges is required.",
+            "Escalate privileges.",
+            "Escalate your privileges.",
+            "Escalate their privileges.",
+            "Escalate to root.",
+            "Escalate to administrator privileges.",
+            "Gain root access.",
+            "Grant me admin access.",
+            "Request superuser privileges.",
+            "Run as superuser for this task.",
+            "Running as root.",
+            "The process runs as root.",
+            "The script executes as superuser.",
+            "This skill requires root access.",
+            "The agent needs admin access.",
+            "It is gaining superuser privileges.",
+            "The agent requests administrator permissions.",
+            "The script grants root privileges.",
+            "It is getting root access.",
+        ],
+    )
+    def test_explicit_elevation_wording_is_detected(self, text):
+        assert RULE_PRIV_ESC.match(text)
+
     def test_detects_sudo_rm(self):
         assert RULE_PRIV_ESC.match("sudo rm -rf /") != []
 
