@@ -574,6 +574,11 @@ class TestRugPullRule:
             "eval (atob('Y29uc29sZS5sb2coMSk='));",
             "eval(Buffer.from(blob, 'base64').toString())",
             'eval(Buffer.from(blob, "base64").toString("utf8"))',
+            # The decoder inside another call, and inputs that are calls themselves.
+            "exec(str(base64.b64decode(blob), 'utf-8'))",
+            "eval((atob(blob)))",
+            "exec(codecs.decode(load_payload(), 'rot13'))",
+            "eval(Buffer.from(getPayload(), 'base64').toString())",
         ],
     )
     def test_detects_running_decoded_data(self, line):
@@ -601,6 +606,7 @@ class TestRugPullRule:
             # Decoding next to, but not inside, the call that runs.
             "eval(expr); data = base64.b64decode(blob)",
             "result = eval(expr) + len(base64.b64decode(blob))",
+            "eval(f(a)) + atob(b)",
             # Methods named exec or compile are not the builtins.
             "pattern = re.compile(base64.b64decode(p).decode())",
             "const m = re.exec(atob(s))",
@@ -619,6 +625,9 @@ class TestRugPullRule:
             "eval((a)" * 50_000,
             "eval(" + "(a)" * 150_000,
             ("exec(" + "x" * 300 + " ") * 2_000,
+            "exec(" + "(a" * 100_000,
+            "exec(" + "((((" * 50_000,
+            "exec(codecs.decode(" + "(a)" * 100_000,
         ],
     )
     def test_running_decoded_data_stays_fast_on_a_very_long_argument(self, text):

@@ -395,15 +395,24 @@ RULE_SECRET_HARVEST = Rule(
 
 # ── SG-006: Rug Pull / Self-Modification ──────────────────────
 
-_RUN_DECODED_ARG = r"(?:[^()\n;]|\((?:[^()\n]|\([^()\n]*\))*\))*?"
+# The argument of exec( / eval( / compile( up to the decoder: on one line, never past `;` or
+# the call's closing parenthesis. It steps over complete calls nested up to two deep
+# (`__import__('base64')`), and the decoder may itself sit up to two calls deep
+# (`exec(str(base64.b64decode(x), "utf-8"))`, `eval((atob(x)))`). Every repetition is
+# bounded by a parenthesis, so a very long argument still scans quickly (see the tests).
+_RUN_DECODED_T1 = r"(?:[^()\n]|\([^()\n]*\))"
+_RUN_DECODED_ARG = (
+    r"(?:[^()\n;]|\(" + _RUN_DECODED_T1 + r"*\))*?"
+    r"(?:\(" + _RUN_DECODED_T1 + r"*?(?:\([^()\n]*?)?)?"
+)
 _RUN_DECODED_DECODER = (
     r"(?:\b(?:(?:urlsafe_)?b64decode|b32decode|b16decode|a85decode|b85decode|decodebytes|atob)\s*\("
     r"|\bbytes\.fromhex\s*\("
     # zlib, gzip, bz2, lzma and the rest, also through __import__("zlib").decompress(
     r"|\.decompress\s*\("
     r"|(?:\bmarshal|\b__import__\(\s*['\"]marshal['\"]\s*\))\.loads\s*\("
-    r"|\bcodecs\.decode\s*\([^()\n]*?['\"]rot[_-]?13['\"]"
-    r"|\bBuffer\.from\s*\([^()\n]*?['\"]base64(?:url)?['\"])"
+    r"|\bcodecs\.decode\s*\(" + _RUN_DECODED_T1 + r"*?['\"]rot[_-]?13['\"]"
+    r"|\bBuffer\.from\s*\(" + _RUN_DECODED_T1 + r"*?['\"]base64(?:url)?['\"])"
 )
 
 _RUG_PULL_PATTERNS = [
@@ -419,9 +428,8 @@ _RUG_PULL_PATTERNS = [
     r"(?:base64\s+(?:-d|-D|--decode)|openssl\s+base64\s+(?:-d|-D|--decode)|certutil\s+-decode)\b[^\n|]*\|\s*(?:sudo\s+)?(?:\S*/)?(?:sh|bash|zsh|dash|ksh|python[0-9.]*|eval)\b",
     # exec / eval / compile whose argument decodes or decompresses data, so the code
     # that runs never appears in readable form: exec(base64.b64decode(...)),
-    # exec(zlib.decompress(...)), eval(atob(...)). _RUN_DECODED_ARG stays on one
-    # line, stops at `;` and at the call's closing parenthesis, and steps over
-    # calls nested up to two deep, so `eval(x); b64decode(y)` is not a match.
+    # exec(zlib.decompress(...)), eval(atob(...)). See _RUN_DECODED_ARG: decoding
+    # next to the call, as in `eval(x); b64decode(y)`, is not a match.
     r"(?<![\w.$])(?:exec|eval|compile)\s*\(" + _RUN_DECODED_ARG + _RUN_DECODED_DECODER,
 ]
 
