@@ -16,6 +16,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- SG-003 no longer treats support-ticket escalation or bare admin-access and superuser references as privilege escalation; explicit requests for elevated access still match (#8).
 - Pattern findings report the starting lines of multiline and repeated matches in text, JSON and SARIF output without repeatedly scanning earlier lines (#9).
 - A directory scan exits 1 when any file is CRITICAL or HIGH (matching a single-file scan), and exits 2 when any file cannot be read. Before, a folder whose only problem was HIGH exited 0 (#83).
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.

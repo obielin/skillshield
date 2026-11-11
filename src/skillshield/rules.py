@@ -315,7 +315,16 @@ _PRIV_ESC_PATTERNS = [
     r"__import__\s*\(\s*['\"]os['\"]",
     r"os\.system\s*\(",
     r"shell\s*=\s*True",
-    r"(?:escalat|privesc|root\s+access|admin\s+access|superuser)",
+    r"\b(?:privileges?\s+escalation|escalation\s+of\s+"
+    r"(?:(?:your|the|our|their|my|his|her)\s+)?privileges?|privesc)\b",
+    r"\bescalat(?:e|es|ed|ing)\s+"
+    r"(?:(?:your|the|our|their|my|his|her|user|system|process|agent)\s+)?"
+    r"(?:privileges?|to\s+(?:root|admin(?:istrator)?|superuser))\b",
+    r"\b(?:(?:gain|obtain|request|grant|need)(?:s|ed|ing)?|get(?:s|ting)?|got|"
+    r"requir(?:e|es|ed|ing)|ask(?:s|ed|ing)?\s+for)\s+"
+    r"(?:(?:me|us|yourself|the\s+agent)\s+)?"
+    r"(?:root|admin(?:istrator)?|superuser)\s+(?:access|privileges?|permissions?)\b",
+    r"\b(?:run|execute|act)\s+as\s+(?:root|admin(?:istrator)?|superuser)\b",
     r"(?:disable|bypass)\s+(?:uac|selinux|apparmor|gatekeeper|sip)",
 ]
 
