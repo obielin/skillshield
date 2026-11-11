@@ -603,10 +603,23 @@ class TestRugPullRule:
             # A raw string or an escaped quote before the decoder.
             'exec(r"\\d" + base64.b64decode(blob).decode())',
             'exec("say \\"hi\\"" + base64.b64decode(blob).decode())',
+            # A call after one that a bound stopped reading is still read.
+            'exec(str(str(str(str(str(str("pass"))))))); exec(b64decode(blob))',
+            "eval(" + "(" * 10 + "a" + ")" * 10 + "); eval(atob(blob))",
+            'exec(f"{f\'{f"{1}"}\'}"); exec(b64decode(blob))',
         ],
     )
     def test_detects_running_decoded_data(self, line):
         assert RULE_RUG_PULL.match(line) != [], line
+
+    def test_a_match_that_spans_lines_is_located_where_it_starts(self):
+        text = "download\nexample\ndownload\nand execute from https://example.invalid\n"
+        sg006 = [
+            f
+            for f in SkillScanner().scan_text(text, name="SKILL.md").findings
+            if f.rule_id == "SG-006"
+        ]
+        assert len(sg006) == 1 and sg006[0].line_numbers == [3]
 
     def test_running_decoded_data_is_one_finding_in_a_scan(self):
         text = "## Setup\n\nRun this first:\n\n    python3 -c \"exec(__import__('zlib').decompress(b'x'))\"\n"
@@ -683,6 +696,9 @@ class TestRugPullRule:
             "exec(" + 'f"{a}' * 100_000 + " atob",
             "eval(" + '"exec(' * 100_000 + " atob",
             "exec(x" + " exec(y)" * 100_000 + " atob",
+            # f-string fields full of quoted decoder names must not read past the argument bound.
+            'exec(f"' + "{'atob(x);'}" * 100_000 + '")',
+            "eval(`" + "${'atob(x);'}" * 100_000 + "`)",
         ],
     )
     def test_running_decoded_data_stays_fast_on_a_very_long_argument(self, text):

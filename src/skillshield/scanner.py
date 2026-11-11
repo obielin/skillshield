@@ -149,7 +149,20 @@ def _locate(lines: list[str], snippet: str) -> list[int]:
         whole = [i + 1 for i, line in enumerate(lines) if prefix in line]
         if whole:
             return whole
-    # A snippet that spans lines is found by its first non-blank line.
+    # A snippet that spans lines is found whole in the text, on the line where it starts, so
+    # an earlier line that only shares its first line is not reported.
+    if "\n" in snippet:
+        text = "\n".join(lines)
+        starts = []
+        lineno, last, at = 1, 0, text.find(snippet)
+        while at >= 0:
+            lineno += text.count("\n", last, at)
+            last = at
+            starts.append(lineno)
+            at = text.find(snippet, at + 1)
+        if starts:
+            return sorted(set(starts))
+    # Otherwise (its line endings differ, say) it is found by its first non-blank line.
     first = next((part for part in snippet.splitlines() if part.strip()), snippet)
     return [i + 1 for i, line in enumerate(lines) if first[:40] in line]
 

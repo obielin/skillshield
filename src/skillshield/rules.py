@@ -440,6 +440,10 @@ class _Source:
         self.length = 0
         self.strings: list[tuple[int, int]] = []
         self.limit = _RUN_DECODED_MAX_ARG
+        # The offset in the line that no reader goes past, and whether a bound (this one,
+        # the depth or the nesting) stopped the reading early.
+        self.stop = 0
+        self.stopped = False
         # The (start, end) offsets in the line of every quoted string read, f-strings and
         # template literals included.
         self.string_spans: list[tuple[int, int]] = []
@@ -449,6 +453,16 @@ class _Source:
             self.strings.append((self.length, self.length + len(piece)))
         self.parts.append(piece)
         self.length += len(piece)
+
+    def halt(self, i: int) -> int:
+        """A bound was reached at offset i: stop every reader there."""
+        self.stopped = True
+        return i
+
+    def in_string(self, offset: int) -> bool:
+        """Whether an offset in the code falls inside one of its quoted strings."""
+        k = bisect_right(self.strings, (offset, float("inf"))) - 1
+        return k >= 0 and self.strings[k][0] <= offset < self.strings[k][1]
 
     def drop(self, count: int) -> None:
         """Take the last ``count`` code characters back out (an f-string's prefix)."""
@@ -490,6 +504,10 @@ def _read_formatted(line: str, i: int, out: _Source, nesting: int, js: bool) -> 
     quote = "`" if js else _quote_at(line, i)
     j = i + len(quote)
     while j < n:
+        if out.stopped:
+            return j
+        if j >= out.stop:
+            return out.halt(j)
         c = line[j]
         if c == "\\":
             j += 2
@@ -526,10 +544,11 @@ def _read_code(
     n = len(line)
     start = i
     level = 0  # brackets opened inside this piece of code
-    is_arg = closer == ")"
     while i < n:
-        if is_arg and i - start > out.limit:
-            return n
+        if out.stopped:
+            return i
+        if i >= out.stop:
+            return out.halt(i)
         c = line[i]
         if c in "'\"":
             # The prefix letters right before the quote, if they are a whole word.
@@ -541,7 +560,7 @@ def _read_code(
                 prefix = ""
             if prefix in _FSTRING_PREFIXES:
                 if nesting >= _RUN_DECODED_MAX_NESTING:
-                    return n
+                    return out.halt(i)
                 # The prefix letters were already copied as code; take them back out.
                 out.drop(len(prefix))
                 end = _read_formatted(line, i, out, nesting, js=False)
@@ -555,7 +574,7 @@ def _read_code(
             continue
         if c == "`":
             if nesting >= _RUN_DECODED_MAX_NESTING:
-                return n
+                return out.halt(i)
             end = _read_formatted(line, i, out, nesting, js=True)
             out.string_spans.append((i, end))
             i = end
@@ -563,12 +582,16 @@ def _read_code(
         if level == 0:
             if c == closer:
                 return i + 1
-            if is_arg and c in ",;":
+            if closer == ")" and c in ",;":
                 return i
             if fstring_field and (c == ":" or (c == "!" and not line.startswith("!=", i))):
                 # The format spec may hold nested {...} fields, which are code too.
                 j = i + 1
                 while j < n and line[j] != "}":
+                    if out.stopped:
+                        return j
+                    if j >= out.stop:
+                        return out.halt(j)
                     if line[j] == "{":
                         j = _read_code(line, j + 1, out, 1, nesting + 1, "}")
                         out.add(" ")
@@ -578,7 +601,7 @@ def _read_code(
         if c in "([{":
             level += 1
             if depth + level > _RUN_DECODED_MAX_DEPTH:
-                return n
+                return out.halt(i)
         elif c in ")]}":
             level -= 1
             if level < 0:
@@ -594,6 +617,8 @@ def _executed_source(line: str, i: int, limit: int) -> tuple[_Source, int]:
     the offset where that argument ends (reading at most ``limit`` characters)."""
     out = _Source()
     out.limit = min(limit, _RUN_DECODED_MAX_ARG)
+    # An absolute boundary, so f-string fields and nested strings cannot read past it either.
+    out.stop = i + out.limit
     end = _read_code(line, i, out, 1, 0, ")")
     return out, end
 
@@ -620,25 +645,27 @@ def _run_decoded_matches(text: str) -> list[str]:
         if last_name < 0:
             continue
         budget = _RUN_DECODED_LINE_BUDGET
-        covered: tuple[int, int, list[tuple[int, int]]] = (0, 0, [])
+        arg_start = arg_end = 0
+        starts: list[int] = []
+        reach: list[int] = []  # the furthest end of the spans that start at or before starts[k]
         for call in _RUN_DECODED_CALL_RE.finditer(line):
             if call.end() > last_name or budget <= 0:
                 break
             # A call in the code of an argument already read was read with it (a call inside
             # a string there was not: `exec("exec(b64decode(x))")` still runs decoded data).
-            arg_start, arg_end, strings = covered
-            if arg_start <= call.start() < arg_end and not any(
-                a <= call.start() < b for a, b in strings
-            ):
-                continue
+            if arg_start <= call.start() < arg_end:
+                k = bisect_right(starts, call.start()) - 1
+                if not (k >= 0 and reach[k] > call.start()):
+                    continue
             source, end = _executed_source(line, call.end(), budget)
             budget -= max(end - call.end(), 1)
-            covered = (call.end(), end, source.string_spans)
+            arg_start, arg_end = call.end(), end
+            starts, reach = [], []
+            for a, b in sorted(source.string_spans):
+                starts.append(a)
+                reach.append(max(b, reach[-1]) if reach else b)
             code = "".join(source.parts)
-            if any(
-                not any(a <= m.start() < b for a, b in source.strings)
-                for m in _RUN_DECODED_DECODER_RE.finditer(code)
-            ):
+            if any(not source.in_string(m.start()) for m in _RUN_DECODED_DECODER_RE.finditer(code)):
                 found.append(line[call.start() : min(end, call.start() + _RUN_DECODED_SNIPPET)])
     return found
 
