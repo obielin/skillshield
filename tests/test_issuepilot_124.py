@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from skillshield import SkillScanner
 
@@ -56,6 +57,24 @@ class TestAgentRuleFiles(unittest.TestCase):
             root = Path(temporary) / ".clinerules"
             root.mkdir()
             self.assert_rules_scanned(root, ["instructions", "nested/policy.custom"])
+
+    def test_rule_directory_reports_oversized_files_as_errors(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            rules = root / ".clinerules"
+            rules.mkdir()
+            (rules / "at-limit.custom").write_bytes(b"a" * 32)
+            (rules / "over-limit.custom").write_bytes(b"a" * 33)
+            with patch("skillshield.scanner._MAX_SCAN_BYTES", 32):
+                report = SkillScanner().scan_directory(root)
+
+            results = {result.skill_name: result for result in report.results}
+            self.assertEqual(results[".clinerules/at-limit.custom"].char_count, 32)
+            oversized = results[".clinerules/over-limit.custom"]
+            self.assertEqual(oversized.risk_level, "ERROR")
+            self.assertIn("32-byte scan limit", oversized.error)
+            self.assertEqual(report.error_count, 1)
+            self.assertEqual(report.metadata.get("unscanned", []), [])
 
     def test_roo_mode_files_and_rule_directories_are_scanned(self):
         with tempfile.TemporaryDirectory() as temporary:

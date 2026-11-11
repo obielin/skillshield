@@ -75,6 +75,8 @@ def _is_agent_rule_file(path: Path) -> bool:
 # Compiled Python that Python runs directly but a text scanner cannot read.
 COMPILED_PYTHON_EXTENSIONS = {".pyc", ".pyo"}
 
+_MAX_SCAN_BYTES = 2 * 1024 * 1024
+
 # Directories that hold tooling or dependencies, never skills the repo ships.
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache"}
 
@@ -329,7 +331,12 @@ class SkillScanner:
             return self._scan_compiled_file(p)
         self._log(f"  Scanning {p.name}...")
         try:
-            text = p.read_text(encoding=encoding, errors="replace")
+            with p.open("rb") as source:
+                data = source.read(_MAX_SCAN_BYTES + 1)
+            if len(data) > _MAX_SCAN_BYTES:
+                raise ValueError(f"File exceeds the {_MAX_SCAN_BYTES:,}-byte scan limit.")
+            text = data.decode(encoding, errors="replace")
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
         except Exception as e:
             return SkillScanResult(
                 skill_name=p.name,
