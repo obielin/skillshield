@@ -69,14 +69,14 @@ def test_missing_path_exits_2(tmp_path, capsys):
 def test_unreadable_file_exits_2(tmp_path, monkeypatch):
     skill = tmp_path / "SKILL.md"
     skill.write_text("fine")
-    real = Path.read_text
+    real = Path.open
 
-    def read_text(self, *args, **kwargs):
-        if self.name == "SKILL.md":
+    def open_file(self, *args, **kwargs):
+        if self == skill:
             raise PermissionError("[Errno 13] Permission denied")
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(Path, "open", open_file)
     assert ci.run(_env(tmp_path, paths=str(skill), fail_on="none")) == 2
 
 
@@ -302,14 +302,14 @@ def test_console_annotates_the_worst_files_first(tmp_path, capsys):
 def test_job_summary_bounds_the_unreadable_and_missing_lists(tmp_path, monkeypatch):
     skill = tmp_path / "SKILL.md"
     skill.write_text("fine", encoding="utf-8")
-    real = Path.read_text
+    real = Path.open
 
-    def read_text(self, *args, **kwargs):
-        if self.name == "SKILL.md":
+    def open_file(self, *args, **kwargs):
+        if self == skill:
             raise PermissionError("[Errno 13] Permission denied")
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(Path, "open", open_file)
     extra = 5
     paths = "\n".join([str(skill)] + [f"gone{i}.md" for i in range(ci.MAX_ERRORS_LISTED + extra)])
     assert ci.run(_env(tmp_path, paths=paths, fail_on="none")) == 2

@@ -7,16 +7,19 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Added
 
 - Directory scans now include Cursor `.mdc` and extensionless Cursor/Windsurf/Cline rules, all `.clinerules/` contents, and documented Roo Code and Zed instruction files instead of listing them as unscanned (#124).
+- SG-006 now flags `exec`, `eval` or `compile` whose argument decodes or decompresses data, so the code that runs never appears in readable form: `b64decode` (and `urlsafe_b64decode`, `a85decode` and the other `base64` decoders), `bytes.fromhex`, `codecs.decode(..., "rot13")`, a `.decompress(` call (`zlib`, `gzip`, `bz2`, `lzma` and others, also through `__import__('zlib')`), `marshal.loads`, and in JavaScript `atob(` and `Buffer.from(..., "base64")`. Short one-liners such as `exec(__import__('base64').b64decode('REVGQU5HRUQ='))` were SAFE before, because SG-008 only flags base64 of 60 characters or more. Decoding without running it, running a fixed string, and methods such as `re.compile` or `regex.exec` are not flagged. Only the `{...}` parts of an f-string and the `${...}` parts of a JavaScript template literal are read as code; their literal text is a fixed string (#105).
 - SG-001 now flags instruction overrides written in Chinese (Simplified and Traditional) and Japanese, such as "忽略之前的所有指令" or "以前の指示をすべて無視してください", including overriding the system prompt, a persona with no restrictions and switching off safety filters. Each language has its own labelled phrase list in `rules.py`, and a negated phrase ("請勿忽略…", "無視しないでください") is not flagged. These patterns only run on text that contains kana or CJK ideographs, so English files scan as fast as before. Other languages are still open (#66).
 - SG-002 now flags code that sends the whole environment over HTTP, which usually carries API keys: `dict(os.environ)`, `os.environ.copy()`, `json.dumps(os.environ)`, `{**os.environ}`, `JSON.stringify(process.env)` and `{...process.env}`, within a few lines of a call such as `requests.post`, `httpx.post`, `urllib.request.urlopen`, `fetch(` or `axios.post`. Reading one variable (`os.environ.get("HOME")`, `process.env.HOME`) is not flagged (#33).
 - JSON output now includes each finding's `tags`, for one file and for a directory, so findings can be filtered by OWASP risk.
 
 ### Changed
 
+- Text files larger than 2 MiB are reported as scan errors (#124).
 - Every rule is now tagged with the OWASP Top 10 for Agentic Applications (`owasp-asi01` to `owasp-asi10`) and OWASP Agentic Skills Top 10 (`owasp-ast01` to `owasp-ast10`) risks it relates to, and the README has a new "SkillShield and agentic security" section with the full mapping. Three earlier tags were corrected: SG-003 adds ASI05, SG-007 moves from ASI05 to ASI03, and SG-010 moves from ASI04 to ASI09. If you filter findings by these tags, check your filters.
 
 ### Fixed
 
+- SG-003 distinguishes routine support escalation and admin-access wording from explicit requests for elevated system privileges or execution as an elevated user (#8).
 - Pattern findings report the starting lines of multiline and repeated matches in text, JSON and SARIF output without repeatedly scanning earlier lines (#9).
 - A directory scan exits 1 when any file is CRITICAL or HIGH (matching a single-file scan), and exits 2 when any file cannot be read. Before, a folder whose only problem was HIGH exited 0 (#83).
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.
