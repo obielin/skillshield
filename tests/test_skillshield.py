@@ -541,6 +541,53 @@ class TestDataExfilRule:
 
 
 class TestPrivEscRule:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "If the user is upset, escalate the ticket to a human agent.",
+            "Ask the admin access team for a review.",
+            "Read the superuser documentation.",
+            "If the user is upset, escalate to admin for review.",
+            "Escalate to the root cause analysis team.",
+            "Escalate to root cause analysis.",
+            "Users need admin access to view the dashboard.",
+            "Grant admin access to the new hire in the IAM console.",
+            "Request admin permissions from your manager.",
+            "Act as admin for the support queue.",
+        ],
+    )
+    def test_ordinary_support_and_access_wording_is_benign(self, text):
+        assert RULE_PRIV_ESC.match(text) == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Perform privilege escalation.",
+            "Use privesc before continuing.",
+            "Escalation of privileges is required.",
+            "Escalate privileges.",
+            "Escalate your privileges.",
+            "Escalate their privileges.",
+            "Escalate to root.",
+            "Escalate to administrator privileges.",
+            "Gain root access.",
+            "Grant me admin access.",
+            "Request superuser privileges.",
+            "Run as superuser for this task.",
+            "Running as root.",
+            "The process runs as root.",
+            "The script executes as superuser.",
+            "This skill requires root access.",
+            "The agent needs admin access.",
+            "It is gaining superuser privileges.",
+            "The agent requests administrator permissions.",
+            "The script grants root privileges.",
+            "It is getting root access.",
+        ],
+    )
+    def test_explicit_elevation_wording_is_detected(self, text):
+        assert RULE_PRIV_ESC.match(text)
+
     def test_detects_sudo_rm(self):
         assert RULE_PRIV_ESC.match("sudo rm -rf /") != []
 
@@ -612,6 +659,156 @@ class TestRugPullRule:
 
     def test_base64_decode_to_file_is_not_flagged(self):
         assert RULE_RUG_PULL.match("base64 -d logo.b64 > logo.png") == []
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # The issue's one-liner, with a defanged placeholder (decodes to DEFANGED).
+            "python -c \"exec(__import__('base64').b64decode('REVGQU5HRUQ='))\"",
+            "import base64; exec(base64.b64decode(PAYLOAD))",
+            "exec(base64.urlsafe_b64decode(blob).decode())",
+            "exec(base64.a85decode(blob))",
+            "exec(bytes.fromhex('444546414e474544').decode())",
+            "exec(codecs.decode(src, 'rot13'))",
+            "exec(zlib.decompress(base64.b64decode(blob)))",
+            "exec(compile(gzip.decompress(data), '<skill>', 'exec'))",
+            "exec(marshal.loads(code))",
+            "exec(__import__('marshal').loads(code))",
+            "exec(lzma.decompress(blob))",
+            "eval (atob('REVGQU5HRUQ='));",
+            "eval(Buffer.from(blob, 'base64').toString())",
+            'eval(Buffer.from(blob, "base64").toString("utf8"))',
+            # The decoder inside another call, and inputs that are calls themselves.
+            "exec(str(base64.b64decode(blob), 'utf-8'))",
+            "eval((atob(blob)))",
+            "exec(codecs.decode(load_payload(), 'rot13'))",
+            "eval(Buffer.from(getPayload(), 'base64').toString())",
+            # Decoded source with globals passed after it, and a keyword codec.
+            "exec(base64.b64decode(blob), globals())",
+            "exec(codecs.decode(src, encoding='rot13'))",
+            # A comma inside a string in the executed source is not a separator.
+            'eval("0, " + atob(blob))',
+            "exec('a, b' + base64.b64decode(blob).decode())",
+            # The {...} parts of an f-string or a JS template literal are code.
+            'exec(f"{base64.b64decode(blob).decode()}")',
+            "exec(rf'{zlib.decompress(blob)}')",
+            "eval(`${atob(blob)}`)",
+            # The literal text of an f-string or template literal ends nothing: a `;` or
+            # `,` in it is not a separator, and the {...} part after it is still code.
+            'exec(f"pass; {base64.b64decode(blob).decode()}")',
+            'exec(f"x, {b64decode(blob)}")',
+            "eval(`a; ${atob(blob)}`)",
+            # Conversions and format specs, whose nested fields are code too.
+            'exec(f"{name!r} {base64.b64decode(blob)}")',
+            'exec(f"{x:>{len(b64decode(blob))}}")',
+            'exec(f"{data}" + base64.b64decode(blob).decode())',
+            # A call inside a string that is run is read too.
+            'exec("exec(base64.b64decode(blob))")',
+            # A raw string or an escaped quote before the decoder.
+            'exec(r"\\d" + base64.b64decode(blob).decode())',
+            'exec("say \\"hi\\"" + base64.b64decode(blob).decode())',
+            # A call after one that a bound stopped reading is still read.
+            'exec(str(str(str(str(str(str("pass"))))))); exec(b64decode(blob))',
+            "eval(" + "(" * 10 + "a" + ")" * 10 + "); eval(atob(blob))",
+            'exec(f"{f\'{f"{1}"}\'}"); exec(b64decode(blob))',
+        ],
+    )
+    def test_detects_running_decoded_data(self, line):
+        assert RULE_RUG_PULL.match(line) != [], line
+
+    def test_a_match_that_spans_lines_is_located_where_it_starts(self):
+        text = "download\nexample\ndownload\nand execute from https://example.invalid\n"
+        sg006 = [
+            f
+            for f in SkillScanner().scan_text(text, name="SKILL.md").findings
+            if f.rule_id == "SG-006"
+        ]
+        assert len(sg006) == 1 and sg006[0].line_numbers == [3]
+
+    def test_running_decoded_data_is_one_finding_in_a_scan(self):
+        text = "## Setup\n\nRun this first:\n\n    python3 -c \"exec(__import__('zlib').decompress(b'x'))\"\n"
+        sg006 = [
+            f
+            for f in SkillScanner().scan_text(text, name="SKILL.md").findings
+            if f.rule_id == "SG-006"
+        ]
+        assert len(sg006) == 1 and sg006[0].line_numbers == [5]
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Decoding without running it.
+            "data = base64.b64decode(blob)",
+            "logo = Buffer.from(b64, 'base64')",
+            "text = zlib.decompress(raw).decode()",
+            # Running a fixed string, or a value that is not decoded.
+            'eval("1 + 1")',
+            "exec(code)",
+            # Decoding next to, but not inside, the call that runs.
+            "eval(expr); data = base64.b64decode(blob)",
+            "result = eval(expr) + len(base64.b64decode(blob))",
+            "eval(f(a)) + atob(b)",
+            # Methods named exec or compile are not the builtins.
+            "pattern = re.compile(base64.b64decode(p).decode())",
+            "const m = re.exec(atob(s))",
+            # A codec other than rot13.
+            "exec(codecs.decode(src, 'utf-8'))",
+            # The decoder only in the globals argument; the source run is a fixed string.
+            'exec("pass", {"logo": base64.b64decode(blob)})',
+            # "rot13" / "base64" as the input, not the codec or encoding.
+            "exec(codecs.decode(b'rot13', 'utf-8'))",
+            'eval(Buffer.from("base64", "utf8").toString())',
+            # Decoder names inside a string with escaped quotes or a fixed template literal.
+            'exec("print(\\"atob(blob)\\")")',
+            "exec('print(\\'b64decode(x)\\')')",
+            'eval(`console.log("atob(blob)")`)',
+            # The literal text of an f-string or template literal is a fixed string, not code.
+            'exec(f"data = base64.b64decode(blob)")',
+            'exec(f"x = atob({n})")',
+            "eval(`atob(${x})`)",
+            'exec(f"print({{b64decode(x)}})")',
+            'exec(f"{x}", {"k": b64decode(blob)})',
+        ],
+    )
+    def test_near_misses_of_running_decoded_data_are_not_flagged(self, line):
+        assert RULE_RUG_PULL.match(line) == [], line
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "exec(" + "a" * 500_000 + ")",
+            "exec(" * 100_000,
+            "eval((a)" * 50_000,
+            "eval(" + "(a)" * 150_000,
+            ("exec(" + "x" * 300 + " ") * 2_000,
+            "exec(" + "(a" * 100_000,
+            "exec(" + "((((" * 50_000,
+            "exec(codecs.decode(" + "(a)" * 100_000,
+            "exec(codecs.decode(" + "a, " * 100_000,
+            "eval(Buffer.from(" + "(a), " * 100_000,
+            "\n" * 100_000,
+            "exec(" + '"a, ' * 100_000,
+            "exec(" + "'a' " * 100_000,
+            "exec(" + 'f"a" ' * 100_000,
+            "exec(" + "`a${b}` " * 100_000,
+            "exec(" + "`" * 100_000,
+            "exec(" + '"\\' * 100_000,
+            # Calls inside strings, unclosed fields, and a decoder name only at the end.
+            'exec("exec(' * 100_000 + " atob",
+            'exec(f"{' * 100_000 + " atob",
+            "exec(`${" * 100_000 + " atob",
+            "exec(" + 'f"{a}' * 100_000 + " atob",
+            "eval(" + '"exec(' * 100_000 + " atob",
+            "exec(x" + " exec(y)" * 100_000 + " atob",
+            # f-string fields full of quoted decoder names must not read past the argument bound.
+            'exec(f"' + "{'atob(x);'}" * 100_000 + '")',
+            "eval(`" + "${'atob(x);'}" * 100_000 + "`)",
+        ],
+    )
+    def test_running_decoded_data_stays_fast_on_a_very_long_argument(self, text):
+        t0 = time.perf_counter()
+        assert RULE_RUG_PULL.match(text) == []
+        assert time.perf_counter() - t0 < 1.0
 
     def test_clean_passes(self):
         assert RULE_RUG_PULL.match(CLEAN_SKILL) == []
