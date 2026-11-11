@@ -213,6 +213,25 @@ def cmd_check(args) -> int:
 def cmd_rules(args) -> None:
     from skillshield.rules import ALL_RULES
 
+    if getattr(args, "format", "text") == "json":
+        print(
+            json.dumps(
+                [
+                    {
+                        "id": rule.id,
+                        "name": rule.name,
+                        "severity": rule.severity.value,
+                        "tags": rule.tags,
+                        "description": rule.description,
+                        "remediation": rule.remediation,
+                    }
+                    for rule in ALL_RULES
+                ],
+                indent=2,
+            )
+        )
+        return
+
     print(f"\nSkillShield has {len(ALL_RULES)} detection rules:\n")
     for rule in ALL_RULES:
         tags = ", ".join(rule.tags) if rule.tags else ""
@@ -259,6 +278,7 @@ Examples:
 
     # rules
     p_rules = sub.add_parser("rules", help="List all detection rules")
+    p_rules.add_argument("--format", choices=["text", "json"], default="text")
     p_rules.set_defaults(func=cmd_rules)
 
     args = p.parse_args()

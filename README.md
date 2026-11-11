@@ -93,6 +93,8 @@ Options for `skillshield scan`:
 
 `skillshield check` uses all rules and always shows matched snippets.
 
+`skillshield rules --format json` lists every rule's `id`, `name`, `severity`, `tags`, `description` and `remediation` as a JSON array. `--format text` preserves the default rules listing.
+
 A directory scan reads every file with one of these extensions, in all subdirectories:
 `.md`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
 
