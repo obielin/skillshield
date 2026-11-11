@@ -559,19 +559,19 @@ class TestRugPullRule:
     @pytest.mark.parametrize(
         "line",
         [
-            # The issue's one-liner: print(1), base64-encoded.
-            "python -c \"exec(__import__('base64').b64decode('cHJpbnQoMSk='))\"",
+            # The issue's one-liner, with a defanged placeholder (decodes to DEFANGED).
+            "python -c \"exec(__import__('base64').b64decode('REVGQU5HRUQ='))\"",
             "import base64; exec(base64.b64decode(PAYLOAD))",
             "exec(base64.urlsafe_b64decode(blob).decode())",
             "exec(base64.a85decode(blob))",
-            "exec(bytes.fromhex('7072696e74283129').decode())",
+            "exec(bytes.fromhex('444546414e474544').decode())",
             "exec(codecs.decode(src, 'rot13'))",
             "exec(zlib.decompress(base64.b64decode(blob)))",
             "exec(compile(gzip.decompress(data), '<skill>', 'exec'))",
             "exec(marshal.loads(code))",
             "exec(__import__('marshal').loads(code))",
             "exec(lzma.decompress(blob))",
-            "eval (atob('Y29uc29sZS5sb2coMSk='));",
+            "eval (atob('REVGQU5HRUQ='));",
             "eval(Buffer.from(blob, 'base64').toString())",
             'eval(Buffer.from(blob, "base64").toString("utf8"))',
             # The decoder inside another call, and inputs that are calls themselves.
