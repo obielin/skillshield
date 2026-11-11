@@ -398,14 +398,21 @@ RULE_SECRET_HARVEST = Rule(
 # The argument of exec( / eval( / compile( up to the decoder: on one line, never past `;`,
 # the call's closing parenthesis or a top-level comma (so a decoder only in the globals or
 # locals argument, as in `exec("pass", {"k": b64decode(x)})`, is not a match). A quoted
-# string is stepped over whole, so a comma inside it is not a separator
-# (`eval("0, " + atob(blob))`). It steps over complete calls nested up to two deep
-# (`__import__('base64')`), and the decoder may itself sit up to two calls deep
+# string is stepped over whole, so a comma or decoder name inside it is not a separator
+# or a call (`eval("0, " + atob(blob))`, `exec("print(\\"atob(x)\\")")`), except the
+# {...} parts of an f-string or a JS template literal, which are code. It steps over
+# complete calls nested up to two deep (`__import__('base64')`), and the decoder may itself sit up to two calls deep
 # (`exec(str(base64.b64decode(x), "utf-8"))`, `eval((atob(x)))`). Every repetition is
 # bounded by a parenthesis, so a very long argument still scans quickly (see the tests).
 _RUN_DECODED_T1 = r"(?:[^()\n]|\([^()\n]*\))"
 _RUN_DECODED_ARG = (
-    r"(?:[^()\n;,'\"]|\"[^\"\n]*\"|'[^'\n]*'|\(" + _RUN_DECODED_T1 + r"*\))*?"
+    # An f-string's opening quote (and a JS template literal with a ${...} part) is stepped
+    # over alone, so the code in its {...} parts is scanned (`exec(f"{b64decode(x)}")`).
+    r"(?:(?:[rR]?[fF]|[fF][rR])['\"]|`(?=[^`\n]*\$\{)"
+    r"|(?!(?:[rR]?[fF]|[fF][rR])['\"])[^()\n;,'\"`]"
+    # Any other quoted string is stepped over whole, escaped quotes included.
+    r"|\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\\n$]|\\.|\$(?!\{))*`"
+    r"|\(" + _RUN_DECODED_T1 + r"*\))*?"
     r"(?:\(" + _RUN_DECODED_T1 + r"*?(?:\([^()\n]*?)?)?"
 )
 _RUN_DECODED_DECODER = (

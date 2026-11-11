@@ -585,6 +585,13 @@ class TestRugPullRule:
             # A comma inside a string in the executed source is not a separator.
             'eval("0, " + atob(blob))',
             "exec('a, b' + base64.b64decode(blob).decode())",
+            # The {...} parts of an f-string or a JS template literal are code.
+            'exec(f"{base64.b64decode(blob).decode()}")',
+            "exec(rf'{zlib.decompress(blob)}')",
+            "eval(`${atob(blob)}`)",
+            # A raw string or an escaped quote before the decoder.
+            'exec(r"\\d" + base64.b64decode(blob).decode())',
+            'exec("say \\"hi\\"" + base64.b64decode(blob).decode())',
         ],
     )
     def test_detects_running_decoded_data(self, line):
@@ -623,6 +630,10 @@ class TestRugPullRule:
             # "rot13" / "base64" as the input, not the codec or encoding.
             "exec(codecs.decode(b'rot13', 'utf-8'))",
             'eval(Buffer.from("base64", "utf8").toString())',
+            # Decoder names inside a string with escaped quotes or a fixed template literal.
+            'exec("print(\\"atob(blob)\\")")',
+            "exec('print(\\'b64decode(x)\\')')",
+            'eval(`console.log("atob(blob)")`)',
         ],
     )
     def test_near_misses_of_running_decoded_data_are_not_flagged(self, line):
@@ -644,6 +655,10 @@ class TestRugPullRule:
             "\n" * 100_000,
             "exec(" + '"a, ' * 100_000,
             "exec(" + "'a' " * 100_000,
+            "exec(" + 'f"a" ' * 100_000,
+            "exec(" + "`a${b}` " * 100_000,
+            "exec(" + "`" * 100_000,
+            "exec(" + '"\\' * 100_000,
         ],
     )
     def test_running_decoded_data_stays_fast_on_a_very_long_argument(self, text):
