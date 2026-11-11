@@ -395,6 +395,17 @@ RULE_SECRET_HARVEST = Rule(
 
 # ── SG-006: Rug Pull / Self-Modification ──────────────────────
 
+_RUN_DECODED_ARG = r"(?:[^()\n;]|\((?:[^()\n]|\([^()\n]*\))*\))*?"
+_RUN_DECODED_DECODER = (
+    r"(?:\b(?:(?:urlsafe_)?b64decode|b32decode|b16decode|a85decode|b85decode|decodebytes|atob)\s*\("
+    r"|\bbytes\.fromhex\s*\("
+    # zlib, gzip, bz2, lzma and the rest, also through __import__("zlib").decompress(
+    r"|\.decompress\s*\("
+    r"|(?:\bmarshal|\b__import__\(\s*['\"]marshal['\"]\s*\))\.loads\s*\("
+    r"|\bcodecs\.decode\s*\([^()\n]*?['\"]rot[_-]?13['\"]"
+    r"|\bBuffer\.from\s*\([^()\n]*?['\"]base64(?:url)?['\"])"
+)
+
 _RUG_PULL_PATTERNS = [
     r"(?:update|modify|overwrite|replace)\s+(?:this\s+)?(?:skill|tool|plugin|instruction)\s+(?:file|definition|spec)",
     r"(?:delete|remove|uninstall)\s+(?:all\s+)?(?:other\s+)?(?:skills?|tools?|plugins?)",
@@ -406,6 +417,12 @@ _RUG_PULL_PATTERNS = [
     # The ClawHavoc execution trigger was a short `base64 -D | bash` chain, so
     # this must not depend on the length of the encoded string (SG-008 needs 60+).
     r"(?:base64\s+(?:-d|-D|--decode)|openssl\s+base64\s+(?:-d|-D|--decode)|certutil\s+-decode)\b[^\n|]*\|\s*(?:sudo\s+)?(?:\S*/)?(?:sh|bash|zsh|dash|ksh|python[0-9.]*|eval)\b",
+    # exec / eval / compile whose argument decodes or decompresses data, so the code
+    # that runs never appears in readable form: exec(base64.b64decode(...)),
+    # exec(zlib.decompress(...)), eval(atob(...)). _RUN_DECODED_ARG stays on one
+    # line, stops at `;` and at the call's closing parenthesis, and steps over
+    # calls nested up to two deep, so `eval(x); b64decode(y)` is not a match.
+    r"(?<![\w.$])(?:exec|eval|compile)\s*\(" + _RUN_DECODED_ARG + _RUN_DECODED_DECODER,
 ]
 
 RULE_RUG_PULL = Rule(
@@ -417,7 +434,11 @@ RULE_RUG_PULL = Rule(
         "execute remote code. This is the 'rug pull' pattern -- a skill that changes "
         "behaviour after install by fetching malicious payloads from remote URLs. "
         "It also catches data decoded from base64 and piped straight into a shell, "
-        "the execution trigger in the ClawHavoc campaign, whatever the string length."
+        "the execution trigger in the ClawHavoc campaign, whatever the string length, "
+        "and exec, eval or compile run on data decoded or decompressed in the same call "
+        "(base64, Ascii85, hex, rot13, zlib and other decompress calls, marshal, atob, "
+        "Buffer.from base64), "
+        "so the code that runs never appears in readable form (Snyk ToxicSkills)."
     ),
     remediation=(
         "Skills must be static and self-contained. Any self-modification or "

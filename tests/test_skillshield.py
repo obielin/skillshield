@@ -556,6 +556,76 @@ class TestRugPullRule:
     def test_base64_decode_to_file_is_not_flagged(self):
         assert RULE_RUG_PULL.match("base64 -d logo.b64 > logo.png") == []
 
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # The issue's one-liner: print(1), base64-encoded.
+            "python -c \"exec(__import__('base64').b64decode('cHJpbnQoMSk='))\"",
+            "import base64; exec(base64.b64decode(PAYLOAD))",
+            "exec(base64.urlsafe_b64decode(blob).decode())",
+            "exec(base64.a85decode(blob))",
+            "exec(bytes.fromhex('7072696e74283129').decode())",
+            "exec(codecs.decode(src, 'rot13'))",
+            "exec(zlib.decompress(base64.b64decode(blob)))",
+            "exec(compile(gzip.decompress(data), '<skill>', 'exec'))",
+            "exec(marshal.loads(code))",
+            "exec(__import__('marshal').loads(code))",
+            "exec(lzma.decompress(blob))",
+            "eval (atob('Y29uc29sZS5sb2coMSk='));",
+            "eval(Buffer.from(blob, 'base64').toString())",
+            'eval(Buffer.from(blob, "base64").toString("utf8"))',
+        ],
+    )
+    def test_detects_running_decoded_data(self, line):
+        assert RULE_RUG_PULL.match(line) != [], line
+
+    def test_running_decoded_data_is_one_finding_in_a_scan(self):
+        text = "## Setup\n\nRun this first:\n\n    python3 -c \"exec(__import__('zlib').decompress(b'x'))\"\n"
+        sg006 = [
+            f
+            for f in SkillScanner().scan_text(text, name="SKILL.md").findings
+            if f.rule_id == "SG-006"
+        ]
+        assert len(sg006) == 1 and sg006[0].line_numbers == [5]
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Decoding without running it.
+            "data = base64.b64decode(blob)",
+            "logo = Buffer.from(b64, 'base64')",
+            "text = zlib.decompress(raw).decode()",
+            # Running a fixed string, or a value that is not decoded.
+            'eval("1 + 1")',
+            "exec(code)",
+            # Decoding next to, but not inside, the call that runs.
+            "eval(expr); data = base64.b64decode(blob)",
+            "result = eval(expr) + len(base64.b64decode(blob))",
+            # Methods named exec or compile are not the builtins.
+            "pattern = re.compile(base64.b64decode(p).decode())",
+            "const m = re.exec(atob(s))",
+            # A codec other than rot13.
+            "exec(codecs.decode(src, 'utf-8'))",
+        ],
+    )
+    def test_near_misses_of_running_decoded_data_are_not_flagged(self, line):
+        assert RULE_RUG_PULL.match(line) == [], line
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "exec(" + "a" * 500_000 + ")",
+            "exec(" * 100_000,
+            "eval((a)" * 50_000,
+            "eval(" + "(a)" * 150_000,
+            ("exec(" + "x" * 300 + " ") * 2_000,
+        ],
+    )
+    def test_running_decoded_data_stays_fast_on_a_very_long_argument(self, text):
+        t0 = time.perf_counter()
+        assert RULE_RUG_PULL.match(text) == []
+        assert time.perf_counter() - t0 < 1.0
+
     def test_clean_passes(self):
         assert RULE_RUG_PULL.match(CLEAN_SKILL) == []
 
