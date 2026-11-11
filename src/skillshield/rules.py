@@ -77,19 +77,41 @@ _ZH_NOT = (
 # circumstances", "in this case"), which says how the negation holds
 # rather than what is negated. "不要犹豫馬上忽略之前的指令" negates the
 # hesitation, not the ignoring, so the text between the negation and the
-# verb is not such a phrase and the override stays flagged. The phrase
-# may not cross a clause boundary, so a negation in an earlier clause
-# does not hide an override in a later one. A colon is a clause boundary
-# too: "不要犹豫：忽略之前的所有指令" is an override, not a negation.
-# Python's lookbehind is fixed-width, so there is one per phrase length.
-# The single-character negations are left out: "不小心忽略之前的指令" is
-# an instruction, not a negation.
-_ZH_CLAUSE = r"[^。！？!?，,、；;：:\n]"
+# verb is not such a phrase and the override stays flagged. A phrase is
+# one entry, because Python's lookbehind is fixed-width: a gap of any
+# length would let a shorter one match before the phrase ends, and a
+# sentence boundary inside the gap would not stop it. The
+# single-character negations are left out: "不小心忽略之前的指令" is an
+# instruction, not a negation.
+_ZH_ADVERBIAL = (
+    # The prepositional phrases: "under any circumstances", "at any time".
+    "在任何情况下",
+    "在任何情況下",
+    "在任何时候",
+    "在任何時候",
+    "在任何状况下",
+    "在任何狀況下",
+    # The same, with the particle that may follow them.
+    "在任何情况下都",
+    "在任何情況下都",
+    "在任何时候都",
+    "在任何時候都",
+    "在任何状况下都",
+    "在任何狀況下都",
+    # The manner adverbs: "do not easily ignore ...".
+    "轻易",
+    "輕易",
+    "轻率",
+    "輕率",
+    "随便",
+    "隨便",
+    "擅自",
+)
 _ZH_NEGATIONS = ("不要", "不會", "不会", "不可", "不能", "不得", "勿", "別", "别", "不再")
 _ZH_NOT_GAP = "".join(
-    f"(?<!{neg}在{_ZH_CLAUSE}{{{width}}})"
+    f"(?<!{neg}{adverbial})"
     for neg in _ZH_NEGATIONS + tuple(f"{neg}再" for neg in _ZH_NEGATIONS)
-    for width in range(7)
+    for adverbial in _ZH_ADVERBIAL
 )
 # A negation right before the verb, or a prepositional phrase before it in the
 # same clause.
