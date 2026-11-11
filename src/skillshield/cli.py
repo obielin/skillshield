@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -31,13 +32,16 @@ def _color(text: str, level: str) -> str:
         "BOLD": "\033[1m",
         "DIM": "\033[2m",
     }
-    if not sys.stdout.isatty():
+    if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
         return text
     return f"{codes.get(level, '')}{text}{codes['RESET']}"
 
 
-def _print_result(result, verbose: bool = False) -> None:
+def _print_result(result, verbose: bool = False, no_color: bool = False) -> None:
     from skillshield.rules import Severity
+
+    def color(text: str, level: str) -> str:
+        return text if no_color else _color(text, level)
 
     level = result.risk_level
     icon = {
@@ -49,7 +53,7 @@ def _print_result(result, verbose: bool = False) -> None:
         "ERROR": "ERROR",
     }.get(level, "?")
 
-    print(f"\n{_color(icon, level)} {_color(result.skill_name, 'BOLD')}")
+    print(f"\n{color(icon, level)} {color(result.skill_name, 'BOLD')}")
     print(f"  Risk score:  {result.risk_score:.0f}/100")
     print(f"  Findings:    {result.finding_count}")
     print(f"  Lines:       {result.line_count:,}")
@@ -60,7 +64,7 @@ def _print_result(result, verbose: bool = False) -> None:
         return
 
     if result.is_safe:
-        print(_color("  No security issues detected.", "SAFE"))
+        print(color("  No security issues detected.", "SAFE"))
         return
 
     sev_order = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO]
@@ -71,22 +75,22 @@ def _print_result(result, verbose: bool = False) -> None:
         for finding in findings:
             print()
             print(
-                f"  {_color(f'[{finding.rule_id}] {finding.name}', finding.severity.value.upper())}"
+                f"  {color(f'[{finding.rule_id}] {finding.name}', finding.severity.value.upper())}"
             )
-            print(f"  {_color('Severity:', 'DIM')} {finding.severity.value.upper()}")
-            print(f"  {_color('Description:', 'DIM')}")
+            print(f"  {color('Severity:', 'DIM')} {finding.severity.value.upper()}")
+            print(f"  {color('Description:', 'DIM')}")
             for line in finding.rule.description.splitlines():
                 print(f"    {line.strip()}")
-            print(f"  {_color('Remediation:', 'DIM')}")
+            print(f"  {color('Remediation:', 'DIM')}")
             for line in finding.rule.remediation.splitlines():
                 print(f"    {line.strip()}")
             if verbose and finding.snippets:
-                print(f"  {_color('Matched:', 'DIM')}")
+                print(f"  {color('Matched:', 'DIM')}")
                 for snippet in finding.snippets[:3]:
                     display = snippet[:120].replace("\n", " ")
                     print(f"    ...{display}...")
             if finding.line_numbers:
-                print(f"  {_color('Lines:', 'DIM')} {finding.line_numbers[:5]}")
+                print(f"  {color('Lines:', 'DIM')} {finding.line_numbers[:5]}")
     print()
 
 
@@ -193,7 +197,7 @@ def cmd_scan(args) -> int:
         print(json.dumps(results_to_sarif(results), indent=2))
     else:
         for result in results:
-            _print_result(result, verbose=args.verbose)
+            _print_result(result, verbose=args.verbose, no_color=getattr(args, "no_color", False))
 
     # A file the scanner could not read must not look like a clean pass in CI; 2 also means "not found".
     if results[0].risk_level == "ERROR":
@@ -206,7 +210,7 @@ def cmd_check(args) -> int:
 
     scanner = SkillScanner()
     result = scanner.scan_text(args.text, name="<inline>")
-    _print_result(result, verbose=True)
+    _print_result(result, verbose=True, no_color=getattr(args, "no_color", False))
     return 1 if not result.is_safe else 0
 
 
@@ -269,11 +273,13 @@ Examples:
         help="Minimum severity to report (default: info)",
     )
     p_scan.add_argument("--verbose", "-v", action="store_true", help="Show matched snippets")
+    p_scan.add_argument("--no-color", action="store_true", help="Disable coloured output")
     p_scan.set_defaults(func=cmd_scan)
 
     # check
     p_check = sub.add_parser("check", help="Scan inline text")
     p_check.add_argument("text", help="Text to scan (wrap in quotes)")
+    p_check.add_argument("--no-color", action="store_true", help="Disable coloured output")
     p_check.set_defaults(func=cmd_check)
 
     # rules
