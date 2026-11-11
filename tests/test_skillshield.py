@@ -582,6 +582,9 @@ class TestRugPullRule:
             # Decoded source with globals passed after it, and a keyword codec.
             "exec(base64.b64decode(blob), globals())",
             "exec(codecs.decode(src, encoding='rot13'))",
+            # A comma inside a string in the executed source is not a separator.
+            'eval("0, " + atob(blob))',
+            "exec('a, b' + base64.b64decode(blob).decode())",
         ],
     )
     def test_detects_running_decoded_data(self, line):
@@ -639,6 +642,8 @@ class TestRugPullRule:
             "exec(codecs.decode(" + "a, " * 100_000,
             "eval(Buffer.from(" + "(a), " * 100_000,
             "\n" * 100_000,
+            "exec(" + '"a, ' * 100_000,
+            "exec(" + "'a' " * 100_000,
         ],
     )
     def test_running_decoded_data_stays_fast_on_a_very_long_argument(self, text):

@@ -397,13 +397,15 @@ RULE_SECRET_HARVEST = Rule(
 
 # The argument of exec( / eval( / compile( up to the decoder: on one line, never past `;`,
 # the call's closing parenthesis or a top-level comma (so a decoder only in the globals or
-# locals argument, as in `exec("pass", {"k": b64decode(x)})`, is not a match). It steps over complete calls nested up to two deep
+# locals argument, as in `exec("pass", {"k": b64decode(x)})`, is not a match). A quoted
+# string is stepped over whole, so a comma inside it is not a separator
+# (`eval("0, " + atob(blob))`). It steps over complete calls nested up to two deep
 # (`__import__('base64')`), and the decoder may itself sit up to two calls deep
 # (`exec(str(base64.b64decode(x), "utf-8"))`, `eval((atob(x)))`). Every repetition is
 # bounded by a parenthesis, so a very long argument still scans quickly (see the tests).
 _RUN_DECODED_T1 = r"(?:[^()\n]|\([^()\n]*\))"
 _RUN_DECODED_ARG = (
-    r"(?:[^()\n;,]|\(" + _RUN_DECODED_T1 + r"*\))*?"
+    r"(?:[^()\n;,'\"]|\"[^\"\n]*\"|'[^'\n]*'|\(" + _RUN_DECODED_T1 + r"*\))*?"
     r"(?:\(" + _RUN_DECODED_T1 + r"*?(?:\([^()\n]*?)?)?"
 )
 _RUN_DECODED_DECODER = (
