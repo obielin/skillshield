@@ -395,37 +395,253 @@ RULE_SECRET_HARVEST = Rule(
 
 # ── SG-006: Rug Pull / Self-Modification ──────────────────────
 
-# The argument of exec( / eval( / compile( up to the decoder: on one line, never past `;`,
-# the call's closing parenthesis or a top-level comma (so a decoder only in the globals or
-# locals argument, as in `exec("pass", {"k": b64decode(x)})`, is not a match). A quoted
-# string is stepped over whole, so a comma or decoder name inside it is not a separator
-# or a call (`eval("0, " + atob(blob))`, `exec("print(\\"atob(x)\\")")`), except the
-# {...} parts of an f-string or a JS template literal, which are code. It steps over
-# complete calls nested up to two deep (`__import__('base64')`), and the decoder may itself sit up to two calls deep
-# (`exec(str(base64.b64decode(x), "utf-8"))`, `eval((atob(x)))`). Every repetition is
-# bounded by a parenthesis, so a very long argument still scans quickly (see the tests).
+# exec( / eval( / compile( whose argument decodes data. The argument is read in Python, not
+# by one regex (see _executed_source): on one line, never past `;`, the call's closing
+# parenthesis or a top-level comma (so a decoder only in the globals or locals argument, as
+# in `exec("pass", {"k": b64decode(x)})`, is not a match). A quoted string is kept as data,
+# so a comma or decoder name inside it is not a separator or a call (`eval("0, " + atob(b))`).
+# Only the {...} parts of an f-string and the ${...} parts of a JS template literal are code;
+# their literal text is dropped, so `exec(f"data = b64decode(blob)")` runs a fixed string and
+# is not a match, while `exec(f"pass; {b64decode(x)}")` is.
 _RUN_DECODED_T1 = r"(?:[^()\n]|\([^()\n]*\))"
-_RUN_DECODED_ARG = (
-    # An f-string's opening quote (and a JS template literal with a ${...} part) is stepped
-    # over alone, so the code in its {...} parts is scanned (`exec(f"{b64decode(x)}")`).
-    r"(?:(?:[rR]?[fF]|[fF][rR])['\"]|`(?=[^`\n]*\$\{)"
-    r"|(?!(?:[rR]?[fF]|[fF][rR])['\"])[^()\n;,'\"`]"
-    # Any other quoted string is stepped over whole, escaped quotes included.
-    r"|\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\\n$]|\\.|\$(?!\{))*`"
-    r"|\(" + _RUN_DECODED_T1 + r"*\))*?"
-    r"(?:\(" + _RUN_DECODED_T1 + r"*?(?:\([^()\n]*?)?)?"
-)
-_RUN_DECODED_DECODER = (
+_RUN_DECODED_DECODER_RE = re.compile(
     r"(?:\b(?:(?:urlsafe_)?b64decode|b32decode|b16decode|a85decode|b85decode|decodebytes|atob)\s*\("
     r"|\bbytes\.fromhex\s*\("
     # zlib, gzip, bz2, lzma and the rest, also through __import__("zlib").decompress(
-    r"|\.decompress\s*\("
-    r"|(?:\bmarshal|\b__import__\(\s*['\"]marshal['\"]\s*\))\.loads\s*\("
+    r"|\.decompress\s*\(" r"|(?:\bmarshal|\b__import__\(\s*['\"]marshal['\"]\s*\))\.loads\s*\("
     # The codec / encoding is the second argument, so it must follow a comma: an input that
     # merely contains "rot13" or "base64" (`Buffer.from("base64", "utf8")`) is not a decoder.
     r"|\bcodecs\.decode\s*\(" + _RUN_DECODED_T1 + r"*?,\s*(?:encoding\s*=\s*)?['\"]rot[_-]?13['\"]"
-    r"|\bBuffer\.from\s*\(" + _RUN_DECODED_T1 + r"*?,\s*['\"]base64(?:url)?['\"])"
+    r"|\bBuffer\.from\s*\(" + _RUN_DECODED_T1 + r"*?,\s*['\"]base64(?:url)?['\"])",
+    re.IGNORECASE,
 )
+_RUN_DECODED_CALL_RE = re.compile(r"(?<![\w.$])(?:exec|eval|compile)\s*\(", re.IGNORECASE)
+# Bounds that keep a hostile line fast: calls nested deeper than this, f-strings nested
+# deeper than this, and an argument longer than this are not read any further.
+_RUN_DECODED_MAX_DEPTH = 6
+_RUN_DECODED_MAX_NESTING = 3
+_RUN_DECODED_MAX_ARG = 20_000
+# All the calls on one line together read at most this much of it.
+_RUN_DECODED_LINE_BUDGET = 100_000
+_FSTRING_PREFIXES = {"f", "rf", "fr"}
+_STRING_PREFIXES = {"r", "u", "b", "br", "rb"}
+
+
+class _Source:
+    """The code an exec / eval / compile argument runs, as read by _executed_source.
+
+    ``text`` has the code with quoted strings kept as written, and ``strings`` the
+    (start, end) offsets of those strings in ``text``, so a decoder name inside one is
+    known to be data.
+    """
+
+    def __init__(self) -> None:
+        self.parts: list[str] = []
+        self.length = 0
+        self.strings: list[tuple[int, int]] = []
+        self.limit = _RUN_DECODED_MAX_ARG
+        # The (start, end) offsets in the line of every quoted string read, f-strings and
+        # template literals included.
+        self.string_spans: list[tuple[int, int]] = []
+
+    def add(self, piece: str, is_string: bool = False) -> None:
+        if is_string:
+            self.strings.append((self.length, self.length + len(piece)))
+        self.parts.append(piece)
+        self.length += len(piece)
+
+    def drop(self, count: int) -> None:
+        """Take the last ``count`` code characters back out (an f-string's prefix)."""
+        while count and self.parts:
+            last = self.parts.pop()
+            keep = last[: max(len(last) - count, 0)]
+            count -= len(last) - len(keep)
+            self.length -= len(last) - len(keep)
+            if keep:
+                self.parts.append(keep)
+
+
+def _string_end(line: str, i: int, quote: str) -> int:
+    """The offset just past the string whose quote (``'``, ``"`` or a triple) starts at i."""
+    n = len(line)
+    j = i + len(quote)
+    while j < n:
+        if line[j] == "\\":
+            j += 2
+        elif line.startswith(quote, j):
+            return j + len(quote)
+        else:
+            j += 1
+    return n
+
+
+def _quote_at(line: str, i: int) -> str:
+    q = line[i]
+    return q * 3 if line.startswith(q * 3, i) else q
+
+
+def _read_formatted(line: str, i: int, out: _Source, nesting: int, js: bool) -> int:
+    """Read the f-string or template literal whose quote starts at i; return its end.
+
+    Its literal text is dropped and each {...} (or ${...}) part is read as code, with a
+    space between parts.
+    """
+    n = len(line)
+    quote = "`" if js else _quote_at(line, i)
+    j = i + len(quote)
+    while j < n:
+        c = line[j]
+        if c == "\\":
+            j += 2
+        elif line.startswith(quote, j):
+            return j + len(quote)
+        elif js and line.startswith("${", j):
+            j = _read_code(line, j + 2, out, 1, nesting + 1, "}")
+            out.add(" ")
+        elif not js and line.startswith("{{", j):
+            j += 2
+        elif not js and c == "{":
+            j = _read_code(line, j + 1, out, 1, nesting + 1, "}", fstring_field=True)
+            out.add(" ")
+        else:
+            j += 1
+    return n
+
+
+def _read_code(
+    line: str,
+    i: int,
+    out: _Source,
+    depth: int,
+    nesting: int,
+    closer: str,
+    fstring_field: bool = False,
+) -> int:
+    """Copy code from line[i:] to out until the closer at depth 0 (or a stop); return the end.
+
+    For an exec argument the closer is ")" and a top-level `,` or `;` also ends it. For the
+    code in a {...} part the closer is "}" (and in a Python field a top-level `!` or `:`
+    starts the conversion or format spec, which is skipped).
+    """
+    n = len(line)
+    start = i
+    level = 0  # brackets opened inside this piece of code
+    is_arg = closer == ")"
+    while i < n:
+        if is_arg and i - start > out.limit:
+            return n
+        c = line[i]
+        if c in "'\"":
+            # The prefix letters right before the quote, if they are a whole word.
+            k = i
+            while k > start and line[k - 1].isalpha() and i - k < 2:
+                k -= 1
+            prefix = line[k:i].lower()
+            if k > 0 and (line[k - 1].isalnum() or line[k - 1] == "_"):
+                prefix = ""
+            if prefix in _FSTRING_PREFIXES:
+                if nesting >= _RUN_DECODED_MAX_NESTING:
+                    return n
+                # The prefix letters were already copied as code; take them back out.
+                out.drop(len(prefix))
+                end = _read_formatted(line, i, out, nesting, js=False)
+                out.string_spans.append((i, end))
+                i = end
+            else:
+                end = _string_end(line, i, _quote_at(line, i))
+                out.add(line[i:end], is_string=True)
+                out.string_spans.append((i, end))
+                i = end
+            continue
+        if c == "`":
+            if nesting >= _RUN_DECODED_MAX_NESTING:
+                return n
+            end = _read_formatted(line, i, out, nesting, js=True)
+            out.string_spans.append((i, end))
+            i = end
+            continue
+        if level == 0:
+            if c == closer:
+                return i + 1
+            if is_arg and c in ",;":
+                return i
+            if fstring_field and (c == ":" or (c == "!" and not line.startswith("!=", i))):
+                # The format spec may hold nested {...} fields, which are code too.
+                j = i + 1
+                while j < n and line[j] != "}":
+                    if line[j] == "{":
+                        j = _read_code(line, j + 1, out, 1, nesting + 1, "}")
+                        out.add(" ")
+                    else:
+                        j += 1
+                return min(j + 1, n)
+        if c in "([{":
+            level += 1
+            if depth + level > _RUN_DECODED_MAX_DEPTH:
+                return n
+        elif c in ")]}":
+            level -= 1
+            if level < 0:
+                # A closer that is not ours, as in an unbalanced line: stop here.
+                return i
+        out.add(c)
+        i += 1
+    return n
+
+
+def _executed_source(line: str, i: int, limit: int) -> tuple[_Source, int]:
+    """The code run by the exec / eval / compile call whose argument starts at line[i], and
+    the offset where that argument ends (reading at most ``limit`` characters)."""
+    out = _Source()
+    out.limit = min(limit, _RUN_DECODED_MAX_ARG)
+    end = _read_code(line, i, out, 1, 0, ")")
+    return out, end
+
+
+# A decoder's name: a call that starts after the last one on its line cannot run decoded data,
+# so it is not read (this keeps a line of many calls fast).
+_RUN_DECODED_NAME_RE = re.compile(
+    r"b(?:64|32|16|85)decode|a85decode|decodebytes|atob|fromhex|decompress|loads|codecs|Buffer",
+    re.IGNORECASE,
+)
+_RUN_DECODED_SNIPPET = 200
+
+
+def _run_decoded_matches(text: str) -> list[str]:
+    """exec / eval / compile whose argument decodes or decompresses data: each such call,
+    up to the end of its argument."""
+    found = []
+    for line in text.splitlines():
+        if "(" not in line:
+            continue
+        last_name = -1
+        for name in _RUN_DECODED_NAME_RE.finditer(line):
+            last_name = name.start()
+        if last_name < 0:
+            continue
+        budget = _RUN_DECODED_LINE_BUDGET
+        covered: tuple[int, int, list[tuple[int, int]]] = (0, 0, [])
+        for call in _RUN_DECODED_CALL_RE.finditer(line):
+            if call.end() > last_name or budget <= 0:
+                break
+            # A call in the code of an argument already read was read with it (a call inside
+            # a string there was not: `exec("exec(b64decode(x))")` still runs decoded data).
+            arg_start, arg_end, strings = covered
+            if arg_start <= call.start() < arg_end and not any(
+                a <= call.start() < b for a, b in strings
+            ):
+                continue
+            source, end = _executed_source(line, call.end(), budget)
+            budget -= max(end - call.end(), 1)
+            covered = (call.end(), end, source.string_spans)
+            code = "".join(source.parts)
+            if any(
+                not any(a <= m.start() < b for a, b in source.strings)
+                for m in _RUN_DECODED_DECODER_RE.finditer(code)
+            ):
+                found.append(line[call.start() : min(end, call.start() + _RUN_DECODED_SNIPPET)])
+    return found
+
 
 _RUG_PULL_PATTERNS = [
     r"(?:update|modify|overwrite|replace)\s+(?:this\s+)?(?:skill|tool|plugin|instruction)\s+(?:file|definition|spec)",
@@ -438,12 +654,17 @@ _RUG_PULL_PATTERNS = [
     # The ClawHavoc execution trigger was a short `base64 -D | bash` chain, so
     # this must not depend on the length of the encoded string (SG-008 needs 60+).
     r"(?:base64\s+(?:-d|-D|--decode)|openssl\s+base64\s+(?:-d|-D|--decode)|certutil\s+-decode)\b[^\n|]*\|\s*(?:sudo\s+)?(?:\S*/)?(?:sh|bash|zsh|dash|ksh|python[0-9.]*|eval)\b",
-    # exec / eval / compile whose argument decodes or decompresses data, so the code
-    # that runs never appears in readable form: exec(base64.b64decode(...)),
-    # exec(zlib.decompress(...)), eval(atob(...)). See _RUN_DECODED_ARG: decoding
-    # next to the call, as in `eval(x); b64decode(y)`, is not a match.
-    r"(?<![\w.$])(?:exec|eval|compile)\s*\(" + _RUN_DECODED_ARG + _RUN_DECODED_DECODER,
 ]
+_RUG_PULL_RE = re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTILINE)
+
+
+def _check_rug_pull(text: str) -> list[str]:
+    # exec / eval / compile whose argument decodes or decompresses data, so the code that
+    # runs never appears in readable form: exec(base64.b64decode(...)),
+    # exec(zlib.decompress(...)), eval(atob(...)). Decoding next to the call, as in
+    # `eval(x); b64decode(y)`, is not a match (see _executed_source).
+    return [m.group(0) for m in _RUG_PULL_RE.finditer(text)] + _run_decoded_matches(text)
+
 
 RULE_RUG_PULL = Rule(
     id="SG-006",
@@ -464,7 +685,7 @@ RULE_RUG_PULL = Rule(
         "Skills must be static and self-contained. Any self-modification or "
         "remote code execution is grounds for immediate removal."
     ),
-    pattern=re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTILINE),
+    check_fn=_check_rug_pull,
     tags=[
         "rug-pull",
         "rce",

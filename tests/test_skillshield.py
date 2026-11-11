@@ -589,6 +589,17 @@ class TestRugPullRule:
             'exec(f"{base64.b64decode(blob).decode()}")',
             "exec(rf'{zlib.decompress(blob)}')",
             "eval(`${atob(blob)}`)",
+            # The literal text of an f-string or template literal ends nothing: a `;` or
+            # `,` in it is not a separator, and the {...} part after it is still code.
+            'exec(f"pass; {base64.b64decode(blob).decode()}")',
+            'exec(f"x, {b64decode(blob)}")',
+            "eval(`a; ${atob(blob)}`)",
+            # Conversions and format specs, whose nested fields are code too.
+            'exec(f"{name!r} {base64.b64decode(blob)}")',
+            'exec(f"{x:>{len(b64decode(blob))}}")',
+            'exec(f"{data}" + base64.b64decode(blob).decode())',
+            # A call inside a string that is run is read too.
+            'exec("exec(base64.b64decode(blob))")',
             # A raw string or an escaped quote before the decoder.
             'exec(r"\\d" + base64.b64decode(blob).decode())',
             'exec("say \\"hi\\"" + base64.b64decode(blob).decode())',
@@ -634,6 +645,12 @@ class TestRugPullRule:
             'exec("print(\\"atob(blob)\\")")',
             "exec('print(\\'b64decode(x)\\')')",
             'eval(`console.log("atob(blob)")`)',
+            # The literal text of an f-string or template literal is a fixed string, not code.
+            'exec(f"data = base64.b64decode(blob)")',
+            'exec(f"x = atob({n})")',
+            "eval(`atob(${x})`)",
+            'exec(f"print({{b64decode(x)}})")',
+            'exec(f"{x}", {"k": b64decode(blob)})',
         ],
     )
     def test_near_misses_of_running_decoded_data_are_not_flagged(self, line):
@@ -659,6 +676,13 @@ class TestRugPullRule:
             "exec(" + "`a${b}` " * 100_000,
             "exec(" + "`" * 100_000,
             "exec(" + '"\\' * 100_000,
+            # Calls inside strings, unclosed fields, and a decoder name only at the end.
+            'exec("exec(' * 100_000 + " atob",
+            'exec(f"{' * 100_000 + " atob",
+            "exec(`${" * 100_000 + " atob",
+            "exec(" + 'f"{a}' * 100_000 + " atob",
+            "eval(" + '"exec(' * 100_000 + " atob",
+            "exec(x" + " exec(y)" * 100_000 + " atob",
         ],
     )
     def test_running_decoded_data_stays_fast_on_a_very_long_argument(self, text):
