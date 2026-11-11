@@ -579,6 +579,9 @@ class TestRugPullRule:
             "eval((atob(blob)))",
             "exec(codecs.decode(load_payload(), 'rot13'))",
             "eval(Buffer.from(getPayload(), 'base64').toString())",
+            # Decoded source with globals passed after it, and a keyword codec.
+            "exec(base64.b64decode(blob), globals())",
+            "exec(codecs.decode(src, encoding='rot13'))",
         ],
     )
     def test_detects_running_decoded_data(self, line):
@@ -612,6 +615,11 @@ class TestRugPullRule:
             "const m = re.exec(atob(s))",
             # A codec other than rot13.
             "exec(codecs.decode(src, 'utf-8'))",
+            # The decoder only in the globals argument; the source run is a fixed string.
+            'exec("pass", {"logo": base64.b64decode(blob)})',
+            # "rot13" / "base64" as the input, not the codec or encoding.
+            "exec(codecs.decode(b'rot13', 'utf-8'))",
+            'eval(Buffer.from("base64", "utf8").toString())',
         ],
     )
     def test_near_misses_of_running_decoded_data_are_not_flagged(self, line):
@@ -628,6 +636,9 @@ class TestRugPullRule:
             "exec(" + "(a" * 100_000,
             "exec(" + "((((" * 50_000,
             "exec(codecs.decode(" + "(a)" * 100_000,
+            "exec(codecs.decode(" + "a, " * 100_000,
+            "eval(Buffer.from(" + "(a), " * 100_000,
+            "\n" * 100_000,
         ],
     )
     def test_running_decoded_data_stays_fast_on_a_very_long_argument(self, text):

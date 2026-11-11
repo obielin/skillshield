@@ -395,14 +395,15 @@ RULE_SECRET_HARVEST = Rule(
 
 # ── SG-006: Rug Pull / Self-Modification ──────────────────────
 
-# The argument of exec( / eval( / compile( up to the decoder: on one line, never past `;` or
-# the call's closing parenthesis. It steps over complete calls nested up to two deep
+# The argument of exec( / eval( / compile( up to the decoder: on one line, never past `;`,
+# the call's closing parenthesis or a top-level comma (so a decoder only in the globals or
+# locals argument, as in `exec("pass", {"k": b64decode(x)})`, is not a match). It steps over complete calls nested up to two deep
 # (`__import__('base64')`), and the decoder may itself sit up to two calls deep
 # (`exec(str(base64.b64decode(x), "utf-8"))`, `eval((atob(x)))`). Every repetition is
 # bounded by a parenthesis, so a very long argument still scans quickly (see the tests).
 _RUN_DECODED_T1 = r"(?:[^()\n]|\([^()\n]*\))"
 _RUN_DECODED_ARG = (
-    r"(?:[^()\n;]|\(" + _RUN_DECODED_T1 + r"*\))*?"
+    r"(?:[^()\n;,]|\(" + _RUN_DECODED_T1 + r"*\))*?"
     r"(?:\(" + _RUN_DECODED_T1 + r"*?(?:\([^()\n]*?)?)?"
 )
 _RUN_DECODED_DECODER = (
@@ -411,8 +412,10 @@ _RUN_DECODED_DECODER = (
     # zlib, gzip, bz2, lzma and the rest, also through __import__("zlib").decompress(
     r"|\.decompress\s*\("
     r"|(?:\bmarshal|\b__import__\(\s*['\"]marshal['\"]\s*\))\.loads\s*\("
-    r"|\bcodecs\.decode\s*\(" + _RUN_DECODED_T1 + r"*?['\"]rot[_-]?13['\"]"
-    r"|\bBuffer\.from\s*\(" + _RUN_DECODED_T1 + r"*?['\"]base64(?:url)?['\"])"
+    # The codec / encoding is the second argument, so it must follow a comma: an input that
+    # merely contains "rot13" or "base64" (`Buffer.from("base64", "utf8")`) is not a decoder.
+    r"|\bcodecs\.decode\s*\(" + _RUN_DECODED_T1 + r"*?,\s*(?:encoding\s*=\s*)?['\"]rot[_-]?13['\"]"
+    r"|\bBuffer\.from\s*\(" + _RUN_DECODED_T1 + r"*?,\s*['\"]base64(?:url)?['\"])"
 )
 
 _RUG_PULL_PATTERNS = [
