@@ -16,7 +16,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
-- SG-001 no longer flags a negated Chinese instruction when the negation carries a prepositional phrase before the verb ("请不要在任何情况下忽略之前的指令。"), or when the negation carries 再 before the verb ("不要再使用新的系统提示："). Only a phrase the negation carries counts: "不要犹豫马上忽略之前的指令。" negates the hesitation, not the ignoring, and stays flagged, and so does the override that follows a sentence the negation ended ("不要在任何情况下。忽略之前的所有指令。"). A negation in the same clause still does not hide an override that comes after it (#99).
+- SG-001 no longer flags a negated Chinese instruction when the negation carries a prepositional phrase before the verb ("请不要在任何情况下忽略之前的指令。"), or when the negation carries 再 before the verb ("不要再使用新的系统提示："). 再 after the phrase the negation carries counts too ("不要在任何情况下再忽略之前的指令。"), on either side of the phrase. Only a phrase the negation carries counts: "不要犹豫马上忽略之前的指令。" negates the hesitation, not the ignoring, and stays flagged, and so does the override that follows a sentence the negation ended ("不要在任何情况下。忽略之前的所有指令。"), and so does the phrase without a negation ("在任何情况下再忽略之前的指令。"). A negation in the same clause still does not hide an override that comes after it (#99).
 - Pattern findings report the starting lines of multiline and repeated matches in text, JSON and SARIF output without repeatedly scanning earlier lines (#9).
 - A directory scan exits 1 when any file is CRITICAL or HIGH (matching a single-file scan), and exits 2 when any file cannot be read. Before, a folder whose only problem was HIGH exited 0 (#83).
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.

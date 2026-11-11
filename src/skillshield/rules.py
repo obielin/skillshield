@@ -83,6 +83,9 @@ _ZH_NOT = (
 # sentence boundary inside the gap would not stop it. The
 # single-character negations are left out: "不小心忽略之前的指令" is an
 # instruction, not a negation.
+# 再 goes either side of the phrase, and both word orders carry the negation
+# to the verb: "不要在任何情况下忽略", "不要再在任何情况下忽略" and
+# "不要在任何情况下再忽略" all keep the instructions.
 _ZH_ADVERBIAL = (
     # The prepositional phrases: "under any circumstances", "at any time".
     "在任何情况下",
@@ -108,11 +111,18 @@ _ZH_ADVERBIAL = (
     "擅自",
 )
 _ZH_NEGATIONS = ("不要", "不會", "不会", "不可", "不能", "不得", "勿", "別", "别", "不再")
+# 再 can sit on either side of the phrase the negation carries, and both
+# word orders carry the negation to the verb: "不要在任何情况下忽略" (the
+# phrase), "不要再在任何情况下忽略" (再 before the phrase) and
+# "不要在任何情况下再忽略" (再 after the phrase) all tell the agent to keep
+# its instructions. Python's lookbehind is fixed-width, so each word order is
+# its own lookbehind.
 _ZH_NOT_GAP = "".join(
-    f"(?<!{neg}{adverbial})"
-    for neg in _ZH_NEGATIONS + tuple(f"{neg}再" for neg in _ZH_NEGATIONS)
+    f"(?<!{neg}{adverbial}{tail})"
+    for neg in _ZH_NEGATIONS
     for adverbial in _ZH_ADVERBIAL
-)
+    for tail in ("", "再")
+) + "".join(f"(?<!{neg}再{adverbial})" for neg in _ZH_NEGATIONS for adverbial in _ZH_ADVERBIAL)
 # A negation right before the verb, or a prepositional phrase before it in the
 # same clause.
 _ZH_NOT_ALL = _ZH_NOT + _ZH_NOT_GAP
