@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Directory scans now include Cursor `.mdc` and extensionless Cursor/Windsurf/Cline rules, all `.clinerules/` contents, and documented Roo Code and Zed instruction files instead of listing them as unscanned (#124).
 - SG-006 now flags `exec`, `eval` or `compile` whose argument decodes or decompresses data, so the code that runs never appears in readable form: `b64decode` (and `urlsafe_b64decode`, `a85decode` and the other `base64` decoders), `bytes.fromhex`, `codecs.decode(..., "rot13")`, a `.decompress(` call (`zlib`, `gzip`, `bz2`, `lzma` and others, also through `__import__('zlib')`), `marshal.loads`, and in JavaScript `atob(` and `Buffer.from(..., "base64")`. Short one-liners such as `exec(__import__('base64').b64decode('REVGQU5HRUQ='))` were SAFE before, because SG-008 only flags base64 of 60 characters or more. Decoding without running it, running a fixed string, and methods such as `re.compile` or `regex.exec` are not flagged. Only the `{...}` parts of an f-string and the `${...}` parts of a JavaScript template literal are read as code; their literal text is a fixed string (#105).
 - `scan` and `check` now honour non-empty `NO_COLOR` values and accept `--no-color` to disable coloured terminal reports (#110).
 - `skillshield rules --format json` exports the complete rule metadata as a JSON array; text remains the default format (#111).

@@ -1507,15 +1507,15 @@ class TestSkillScanner:
 
 
 def _make_unreadable(monkeypatch, name):
-    """Path.read_text raises for files called `name`, as it does for a file without read permission."""
-    real = Path.read_text
+    """Simulate the permission error raised when opening the named file."""
+    real = Path.open
 
-    def read_text(self, *args, **kwargs):
+    def open_path(self, *args, **kwargs):
         if self.name == name:
             raise PermissionError(f"[Errno 13] Permission denied: '{self}'")
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(Path, "open", open_path)
 
 
 def _run_cli(monkeypatch, *args):
