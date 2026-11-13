@@ -197,6 +197,8 @@ class BatchScanReport:
             lines.append(f"  UNREADABLE ({len(by_level['ERROR'])})")
             for r in by_level["ERROR"]:
                 lines.append(f"    {r.skill_name}: {r.error}")
+                for f in r.findings[:2]:
+                    lines.append(f"         -> {f.rule_id}: {f.name}")
 
         # Files the walk refused to open are named too, so skipping is visible.
         unscanned = self.metadata.get("unscanned") or []

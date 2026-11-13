@@ -61,7 +61,9 @@ def _print_result(result, verbose: bool = False, no_color: bool = False) -> None
 
     if result.error:
         print(f"  Error: {result.error}")
-        return
+        # A file can be unreadable as a tool listing and still match text rules.
+        if not result.findings:
+            return
 
     if result.is_safe:
         print(color("  No security issues detected.", "SAFE"))
