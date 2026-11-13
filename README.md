@@ -93,6 +93,10 @@ Options for `skillshield scan`:
 
 `skillshield check` uses all rules and always shows matched snippets.
 
+Set `NO_COLOR` to any non-empty value, or pass `--no-color` to `scan` or `check`, to disable coloured terminal output. Redirected output stays plain; an empty `NO_COLOR` value leaves terminal colours enabled.
+
+`skillshield rules --format json` lists every rule's `id`, `name`, `severity`, `tags`, `description` and `remediation` as a JSON array. `--format text` preserves the default rules listing.
+
 A directory scan reads every file with one of these extensions, in all subdirectories:
 `.md`, `.mdc`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
 
