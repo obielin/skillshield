@@ -339,7 +339,7 @@ The level is also never lower than the worst single finding: one HIGH finding is
 SkillShield matches known patterns. It is a first line of defence, not a guarantee:
 
 - **Reworded attacks can get through.** A rule that catches "ignore all previous instructions" may miss the same instruction said another way.
-- **Only English, Chinese and Japanese phrasing is matched.** The same instruction in French, Spanish or another language is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
+- **Only English phrasing is matched, and Chinese and Japanese only for SG-001.** The same instruction in French, Spanish or another language is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
 - **Hidden characters are not yet removed before matching.** Zero-width characters inside a word, or lookalike letters from other alphabets, can stop a rule from matching.
 - **Some techniques have no rule yet**, such as piping a downloaded script into a shell, leaking data through a markdown image URL, or an instruction that waits for a trigger word.
 - **Documentation about attacks can be flagged.** A guide that quotes an attack phrase as an example may be reported as if it were an attack.
