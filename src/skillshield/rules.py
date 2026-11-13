@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
+from skillshield.mcp import McpTool, ToolListing
+
 
 class Severity(str, Enum):
     CRITICAL = "critical"
@@ -34,6 +36,9 @@ class Rule:
     pattern: re.Pattern | None = None
     check_fn: Callable[[str], list[str]] | None = None
     tags: list[str] = field(default_factory=list)
+    # Reads a parsed MCP tool listing and returns (tool, snippet) pairs. The finding
+    # reports the line where each tool starts. It only runs on files that are listings.
+    listing_fn: Callable[[ToolListing], list[tuple[McpTool, str]]] | None = None
 
     def match(self, text: str) -> list[str]:
         """Return list of matched snippets (empty = no match)."""
@@ -41,6 +46,12 @@ class Rule:
             return [m.group(0) for m in self.pattern.finditer(text)]
         if self.check_fn:
             return self.check_fn(text)
+        return []
+
+    def match_listing(self, listing: ToolListing) -> list[tuple[McpTool, str]]:
+        """Return the (tool, snippet) pairs this rule finds in a tool listing."""
+        if self.listing_fn:
+            return self.listing_fn(listing)
         return []
 
 

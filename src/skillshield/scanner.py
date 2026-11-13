@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from skillshield.mcp import ListingError, ToolListing, parse_listing
 from skillshield.models import BatchScanReport, Finding, SkillScanResult
 from skillshield.rules import (
     ALL_RULES,
@@ -70,6 +71,30 @@ def _is_agent_rule_file(path: Path) -> bool:
         )
         for parent in path.parents
     )
+
+
+# Files that can hold an MCP tool listing. A .json file is always scanned; a .jsonl
+# file only when it is a listing, since most .jsonl files are data.
+LISTING_EXTENSIONS = {".json", ".jsonl"}
+
+
+def _read_text(path: Path, encoding: str = "utf-8") -> str:
+    with path.open("rb") as source:
+        data = source.read()
+    text = data.decode(encoding, errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _is_tool_listing_file(path: Path) -> bool:
+    """Whether a .jsonl file is an MCP tool listing, readable or not."""
+    if path.suffix.lower() != ".jsonl":
+        return False
+    try:
+        return parse_listing(_read_text(path), path.suffix) is not None
+    except ListingError:
+        return True
+    except OSError:
+        return False
 
 
 # Compiled Python that Python runs directly but a text scanner cannot read.
@@ -260,13 +285,16 @@ class SkillScanner:
         self.verbose = verbose
         self._severity_order = list(Severity)
 
-    def scan_text(self, text: str, name: str = "skill") -> SkillScanResult:
+    def scan_text(
+        self, text: str, name: str = "skill", listing: ToolListing | None = None
+    ) -> SkillScanResult:
         """
         Scan a skill provided as plain text.
 
         Args:
-            text: The skill content (SKILL.md, YAML, Python, etc.)
-            name: Identifier for this skill in the report
+            text:    The skill content (SKILL.md, YAML, Python, etc.)
+            name:    Identifier for this skill in the report
+            listing: The text parsed as an MCP tool listing, for rules that read one
 
         Returns:
             SkillScanResult with all findings and risk score
@@ -290,7 +318,11 @@ class SkillScanner:
                 found_hidden = rule.match(hidden) if hidden else []
             except Exception:
                 found_hidden = []
-            if not snippets and not found_hidden:
+            try:
+                hits = rule.match_listing(listing) if listing is not None else []
+            except Exception:
+                hits = []
+            if not snippets and not found_hidden and not hits:
                 continue
             # Pattern hits can span lines or repeat, so a pattern rule reports the line of each
             # match offset. check_fn rules return plain strings, so their snippets are located.
@@ -309,8 +341,11 @@ class SkillScanner:
                 start = hidden.find(match)
                 owners = hidden_owners[start : start + len(match)] if start >= 0 else []
                 line_numbers.update(owners or hidden_owners)
+            # A listing finding reports the line where its tool starts.
+            line_numbers.update(tool.line for tool, _ in hits)
             line_numbers = sorted(n for n in line_numbers if n >= 1)
             snippets = snippets + [f"[hidden in Unicode tag characters] {s}" for s in found_hidden]
+            snippets += [snippet for _, snippet in hits]
             findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
 
         score = _compute_risk_score(findings)
@@ -342,10 +377,7 @@ class SkillScanner:
             return self._scan_compiled_file(p)
         self._log(f"  Scanning {p.name}...")
         try:
-            with p.open("rb") as source:
-                data = source.read()
-            text = data.decode(encoding, errors="replace")
-            text = text.replace("\r\n", "\n").replace("\r", "\n")
+            text = _read_text(p, encoding)
         except Exception as e:
             return SkillScanResult(
                 skill_name=p.name,
@@ -354,7 +386,20 @@ class SkillScanner:
                 risk_level="ERROR",
                 error=str(e),
             )
-        return self.scan_text(text, name=p.name)
+        listing = None
+        broken = ""
+        if p.suffix.lower() in LISTING_EXTENSIONS:
+            try:
+                listing = parse_listing(text, p.suffix)
+            except ListingError as e:
+                broken = f"malformed MCP tool listing: {e}"
+        result = self.scan_text(text, name=p.name, listing=listing)
+        if broken:
+            # The text rules still ran, so their findings stay with the file, but a listing
+            # that cannot be read is never reported as SAFE.
+            result.risk_level = "ERROR"
+            result.error = broken
+        return result
 
     def _scan_compiled_file(self, path: Path, base: Path | None = None) -> SkillScanResult:
         """Report a compiled Python file as a HIGH finding.
@@ -421,7 +466,11 @@ class SkillScanner:
         base = Path(directory)
         glob = base.rglob("*") if recursive else base.glob("*")
         all_files = [p for p in sorted(glob) if p.is_file()]
-        paths = [p for p in all_files if p.suffix.lower() in exts or _is_agent_rule_file(p)]
+        paths = [
+            p
+            for p in all_files
+            if p.suffix.lower() in exts or _is_agent_rule_file(p) or _is_tool_listing_file(p)
+        ]
         selected_paths = set(paths)
         # A compiled file selected above already reaches
         # scan_file, which dispatches to the compiled check; collecting it
