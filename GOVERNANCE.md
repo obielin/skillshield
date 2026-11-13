@@ -16,7 +16,7 @@ The goal is a project that keeps working when the lead maintainer is busy: decis
 | Dependencies, network access, the zero-dependency promise | The lead maintainer decides, after discussion in an issue. |
 | Releases | A maintainer publishes a release. Releases follow [semantic versioning](https://semver.org/). |
 
-A pull request is merged when a maintainer has reviewed it and any changes they asked for are in. Passing checks are required but are not approval on their own. What happens after a review, including when a maintainer may make small fixes to a contributor's branch, is described in [CONTRIBUTING.md](CONTRIBUTING.md#after-your-pull-request-is-reviewed).
+A pull request is merged when a maintainer has reviewed it and any changes they asked for are in. What happens after a review, including when a maintainer may make small fixes to a contributor's branch, is described in [CONTRIBUTING.md](CONTRIBUTING.md#after-your-pull-request-is-reviewed).
 
 ## Contributor ladder
 
