@@ -98,8 +98,6 @@ A directory scan reads every file with one of these extensions, in all subdirect
 
 It also scans extensionless `.cursorrules`, `.windsurfrules` and `.clinerules` files, plus every file under `.clinerules/`. Roo Code's [documented rule files](https://github.com/RooCodeInc/Roo-Code/blob/main/apps/docs/docs/features/custom-instructions.md) (`.roorules`, `.roorules-*`, `.roo/rules/` and `.roo/rules-*/`) and Zed's [`.rules` instruction file](https://zed.dev/docs/ai/instructions) are included too. Continue's [`.continue/rules/` Markdown and YAML files](https://docs.continue.dev/customize/deep-dives/rules) already use supported extensions.
 
-Text files larger than 2 MiB are reported as scan errors.
-
 `.pyc` and `.pyo` files are always collected as well, wherever they sit, including `.git`, `.venv`, `node_modules` and `__pycache__`. They are not part of the extension list above, so passing `extensions` cannot switch the compiled-Python check off. Every other file the scan does not open is listed in `unscanned`.
 
 #### Example: a skill that triggers SG-011
