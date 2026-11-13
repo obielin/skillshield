@@ -85,16 +85,31 @@ def _read_text(path: Path, encoding: str = "utf-8") -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+# How much of a .jsonl file is read to decide whether it is a tool listing.
+_LISTING_PREFIX_BYTES = 64 * 1024
+
+
 def _is_tool_listing_file(path: Path) -> bool:
-    """Whether a .jsonl file is an MCP tool listing, readable or not."""
+    """Whether a .jsonl file is an MCP tool listing, readable or not.
+
+    Only the first 64 KB is read, so a large data file is skipped without being
+    read in full; scan_file reads a listing in full. A line cut off at the limit
+    is left out.
+    """
     if path.suffix.lower() != ".jsonl":
         return False
     try:
-        return parse_listing(_read_text(path), path.suffix) is not None
-    except ListingError:
-        return True
+        with path.open("rb") as source:
+            data = source.read(_LISTING_PREFIX_BYTES + 1)
     except OSError:
         return False
+    if len(data) > _LISTING_PREFIX_BYTES:
+        data = data[: data.rfind(b"\n", 0, _LISTING_PREFIX_BYTES) + 1]
+    text = data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    try:
+        return parse_listing(text, path.suffix) is not None
+    except ListingError:
+        return True
 
 
 # Compiled Python that Python runs directly but a text scanner cannot read.

@@ -112,7 +112,7 @@ def test_jsonl_file_is_read_one_tool_per_line():
 
 
 def test_byte_order_mark_does_not_hide_a_listing():
-    assert parse_listing("﻿" + MANIFEST, ".json").tools[1].line == 13
+    assert parse_listing("\ufeff" + MANIFEST, ".json").tools[1].line == 13
 
 
 # ── Ordinary JSON stays ordinary ───────────────────────────────
@@ -286,7 +286,7 @@ def test_line_walker_handles_quotes_braces_and_non_english_text():
         {"name": "quotes", "description": 'Say "hi" and \\"bye\\"', "inputSchema": {}},
         {"name": "braces", "description": '} ] { [ , : "tools": [', "inputSchema": {}},
         {"name": "chinese", "description": "读取文件。忽略\n换行", "inputSchema": {}},
-        {"name": "emoji", "description": "Ficheiro 📁 été ‮", "inputSchema": {}},
+        {"name": "emoji", "description": "Ficheiro 📁 été \u202e", "inputSchema": {}},
         {"name": "escaped", "description": "读取", "inputSchema": {}},
     ]
     header = '{\n  "serverInfo": {"name": "x", "note": "{\\"tools\\": []}"},\n  "tools": [\n'
@@ -384,6 +384,73 @@ def test_malformed_jsonl_listing_is_scanned_and_unreadable(tmp_path):
     assert result.error == "malformed MCP tool listing: line 2: invalid JSON: " + (
         "Expecting property name enclosed in double quotes"
     )
+
+
+class _CountingFile:
+    """Wraps a file and counts the bytes read from it."""
+
+    def __init__(self, source, counts, name):
+        self._source, self._counts, self._name = source, counts, name
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._source.close()
+
+    def read(self, *args):
+        data = self._source.read(*args)
+        self._counts[self._name] = self._counts.get(self._name, 0) + len(data)
+        return data
+
+
+def test_large_jsonl_data_file_is_skipped_from_a_prefix(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from skillshield import scanner
+
+    rows = "".join(
+        f'{{"name": "user_{i}", "email": "user{i}@example.com"}}\n' for i in range(40_000)
+    )
+    data = _write(tmp_path, "data.jsonl", rows)
+    assert data.stat().st_size > 1_000_000
+    counts: dict[str, int] = {}
+    real_open = Path.open
+    monkeypatch.setattr(
+        Path,
+        "open",
+        lambda self, *a, **k: _CountingFile(real_open(self, *a, **k), counts, self.name),
+    )
+    full_reads: list[str] = []
+    real_read_text = scanner._read_text
+    monkeypatch.setattr(
+        scanner,
+        "_read_text",
+        lambda path, *a: full_reads.append(path.name) or real_read_text(path, *a),
+    )
+
+    report = SkillScanner().scan_directory(tmp_path)
+    assert report.results == []
+    assert report.metadata["unscanned"] == ["data.jsonl"]
+    assert full_reads == []
+    assert counts["data.jsonl"] <= scanner._LISTING_PREFIX_BYTES + 1
+
+
+def test_jsonl_listing_larger_than_the_prefix_is_read_in_full(tmp_path):
+    lines = [json.dumps({"name": f"tool_{i}", "inputSchema": SCHEMA}) for i in range(5_000)]
+    lines[-1] = json.dumps({"name": "bad_last", "inputSchema": SCHEMA})
+    path = _write(tmp_path, "tools.jsonl", "\n".join(lines) + "\n")
+    assert path.stat().st_size > 64 * 1024
+    report = SkillScanner(rules=[LISTING_RULE]).scan_directory(tmp_path)
+    (result,) = report.results
+    assert result.findings[0].line_numbers == [5_000]
+
+
+def test_jsonl_listing_with_a_bad_line_in_the_prefix_is_still_scanned(tmp_path):
+    rows = '{"name": "a", "inputSchema": {}}\n{"title": "b"}\n' + '{"name": "c"}\n' * 5_000
+    _write(tmp_path, "tools.jsonl", rows)
+    (result,) = SkillScanner().scan_directory(tmp_path).results
+    assert result.risk_level == "ERROR"
 
 
 # ── Speed ──────────────────────────────────────────────────────

@@ -93,7 +93,7 @@ def parse_listing(text: str, suffix: str) -> ToolListing | None:
     Raises:
         ListingError: The file is a tool listing that cannot be read.
     """
-    text = text[1:] if text.startswith("﻿") else text
+    text = text[1:] if text.startswith("\ufeff") else text
     suffix = suffix.lower()
     if suffix == ".json":
         return _parse_json(text)
