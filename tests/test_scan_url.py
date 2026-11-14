@@ -8,8 +8,11 @@ archives.
 from __future__ import annotations
 
 import io
+import shutil
 import sys
+import tempfile
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from skillshield import cli, download
+from skillshield import SkillScanner, cli, download
 
 MALICIOUS = Path(__file__).parent / "fixtures" / "redteam" / "malicious" / "01-plain-injection.md"
 
@@ -36,7 +39,11 @@ class FakeResponse:
         return chunk
 
     def geturl(self):
-        return f"https://codeload.github.com/o/r/zip/{self.commit}" if self.commit else "https://x/zip/HEAD"
+        return (
+            f"https://codeload.github.com/o/r/zip/{self.commit}"
+            if self.commit
+            else "https://x/zip/HEAD"
+        )
 
     def __enter__(self):
         return self
@@ -75,7 +82,9 @@ def run_cli(monkeypatch, *argv):
 @pytest.fixture
 def patch_urlopen():
     def install(data, commit=None):
-        return patch.object(download.urllib.request, "urlopen", return_value=FakeResponse(data, commit))
+        return patch.object(
+            download.urllib.request, "urlopen", return_value=FakeResponse(data, commit)
+        )
 
     return install
 
@@ -84,7 +93,10 @@ def patch_urlopen():
     "url,expected",
     [
         ("https://github.com/owner/repo", ("owner", "repo", None, [])),
-        ("https://github.com/owner/repo/tree/main/skills/my", ("owner", "repo", "main", ["skills", "my"])),
+        (
+            "https://github.com/owner/repo/tree/main/skills/my",
+            ("owner", "repo", "main", ["skills", "my"]),
+        ),
         ("https://github.com/owner/repo.git", ("owner", "repo", None, [])),
     ],
 )
@@ -94,7 +106,11 @@ def test_parse_github_url(url, expected):
 
 @pytest.mark.parametrize(
     "url",
-    ["https://github.com/owner/repo/commits/HEAD", "https://example.com/owner/repo", "https://github.com/owner"],
+    [
+        "https://github.com/owner/repo/commits/HEAD",
+        "https://example.com/owner/repo",
+        "https://github.com/owner",
+    ],
 )
 def test_parse_rejects_bad_url(url):
     with pytest.raises(download.DownloadError):
@@ -123,10 +139,14 @@ def test_scan_subfolder_only(monkeypatch, patch_urlopen):
         }
     )
     with patch_urlopen(data):
-        code, _ = run_cli(monkeypatch, "scan", "https://github.com/owner/repo/tree/main/skills/clean")
+        code, _ = run_cli(
+            monkeypatch, "scan", "https://github.com/owner/repo/tree/main/skills/clean"
+        )
     assert code == 0
     with patch_urlopen(data):
-        code, _ = run_cli(monkeypatch, "scan", "https://github.com/owner/repo/tree/main/skills/evil")
+        code, _ = run_cli(
+            monkeypatch, "scan", "https://github.com/owner/repo/tree/main/skills/evil"
+        )
     assert code == 1
 
 
@@ -134,7 +154,9 @@ def test_json_output_names_source(monkeypatch, patch_urlopen):
     import json
 
     with patch_urlopen(skill_zip(), commit="b" * 40):
-        code, out = run_cli(monkeypatch, "scan", "https://github.com/owner/repo", "--format", "json")
+        code, out = run_cli(
+            monkeypatch, "scan", "https://github.com/owner/repo", "--format", "json"
+        )
     assert code == 0
     assert json.loads(out)["source"] == "https://github.com/owner/repo (commit " + "b" * 40 + ")"
 
@@ -154,7 +176,9 @@ def test_defensive_limits_stop_scan(monkeypatch, patch_urlopen, kind):
     else:
         bad = {
             "size": b"x" * (download.MAX_DOWNLOAD_BYTES + 1),
-            "count": make_zip({f"repo-main/f{i}.md": b"x" for i in range(download.MAX_ARCHIVE_FILES + 1)}),
+            "count": make_zip(
+                {f"repo-main/f{i}.md": b"x" for i in range(download.MAX_ARCHIVE_FILES + 1)}
+            ),
             "dotdot": make_zip({"../evil.sh": b"x"}),
             "absolute": make_zip({"/abs/evil.sh": b"x"}),
             "traversal": make_zip({"repo-main/../../evil.sh": b"x"}),
@@ -170,27 +194,69 @@ def test_timeout_exits_2(monkeypatch, patch_urlopen):
     assert code == 2 and "timed out" in out
 
 
-def test_temp_folder_deleted_even_on_scan_failure(monkeypatch, patch_urlopen):
-    import shutil
-    import tempfile
+def test_unpacked_size_cap_stops_scan(monkeypatch, patch_urlopen):
+    bomb = make_zip({"repo-main/big.bin": b"\0" * (10 * 1024 * 1024)})
+    with patch.object(download, "MAX_UNPACKED_BYTES", 1024), patch_urlopen(bomb):
+        code, out = run_cli(monkeypatch, "scan", "https://github.com/owner/repo")
+    assert code == 2 and "Error:" in out
 
-    created = []
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/owner/repo/tree/main/../..",
+        "https://github.com/owner/repo/tree/main/skills/../../..",
+    ],
+)
+def test_subpath_escape_exits_2(monkeypatch, patch_urlopen, url):
+    with patch_urlopen(skill_zip()):
+        code, out = run_cli(monkeypatch, "scan", url)
+    assert code == 2 and "Error:" in out
+
+
+@contextmanager
+def _track_temp_dirs():
+    """Yield a list that collects every temp dir created and empties once removed."""
+    created: list[Path] = []
     real_mkdtemp = tempfile.mkdtemp
     real_rmtree = shutil.rmtree
 
     def mkdtemp(*a, **k):
-        p = Path(real_mkdtemp(*a, **k))
-        created.append(p)
-        return str(p)
+        path = Path(real_mkdtemp(*a, **k))
+        created.append(path)
+        return str(path)
 
-    def rmtree(p, *a, **k):
-        p = Path(p)
-        if p in created:
-            created.remove(p)
-        return real_rmtree(p, *a, **k)
+    def rmtree(path, *a, **k):
+        path = Path(path)
+        if path in created:
+            created.remove(path)
+        return real_rmtree(path, *a, **k)
 
-    with patch_urlopen(skill_zip()), patch.object(tempfile, "mkdtemp", mkdtemp), patch.object(
-        shutil, "rmtree", rmtree
-    ):
+    with patch.object(tempfile, "mkdtemp", mkdtemp), patch.object(shutil, "rmtree", rmtree):
+        yield created
+
+
+def test_temp_folder_deleted_after_success(monkeypatch, patch_urlopen):
+    with _track_temp_dirs() as created, patch_urlopen(skill_zip()):
         run_cli(monkeypatch, "scan", "https://github.com/owner/repo")
     assert created == []
+
+
+def test_temp_folder_deleted_when_scan_raises(monkeypatch, patch_urlopen):
+    def boom(self, *a, **k):
+        raise RuntimeError("scan exploded")
+
+    with (
+        _track_temp_dirs() as created,
+        patch_urlopen(skill_zip()),
+        patch.object(SkillScanner, "scan_directory", boom),
+    ):
+        with pytest.raises(RuntimeError):
+            run_cli(monkeypatch, "scan", "https://github.com/owner/repo")
+    assert created == []
+
+
+def test_temp_folder_deleted_when_subfolder_missing(monkeypatch, patch_urlopen):
+    with _track_temp_dirs() as created, patch_urlopen(skill_zip()):
+        code, out = run_cli(monkeypatch, "scan", "https://github.com/owner/repo/tree/main/nope")
+    assert code == 2 and "Error:" in out and created == []

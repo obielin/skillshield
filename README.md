@@ -99,14 +99,14 @@ Set `NO_COLOR` to any non-empty value, or pass `--no-color` to `scan` or `check`
 
 ### Check a skill before you install it
 
-The safest moment to check a skill is before it is on your computer. Point `scan` at a GitHub URL and SkillShield downloads the repository (GitHub's archive zip) into a temporary folder, scans it, and deletes the folder — all in one step. Only the files you asked for are downloaded; nothing from the archive is ever run.
+The safest moment to check a skill is before it is on your computer. Point `scan` at a GitHub URL and SkillShield downloads the repository (GitHub's archive zip) into a temporary folder, scans it, and deletes the folder — all in one step. The whole archive is downloaded, but only the path you asked for is scanned; nothing from the archive is ever run.
 
 ```bash
 skillshield scan https://github.com/owner/repo
 skillshield scan https://github.com/owner/repo/tree/main/skills/my-skill
 ```
 
-The URL may name a whole repository, a branch/tag/commit (`/tree/<ref>`), or a sub-folder inside it. The report names the URL and, when GitHub reports one, the exact commit that was scanned. Downloads are guarded: a 50 MB size limit and a file-count limit stop the scan with a clear error, zip-slip entries (absolute paths, `..`, symlinks) are refused, a network timeout is applied, and the temporary folder is deleted even when the scan fails.
+The URL may name a whole repository, a branch/tag/commit (`/tree/<ref>`), or a sub-folder inside it. The report names the URL and, when GitHub reports one, the exact commit that was scanned. Downloads are guarded: a 50 MB download limit, a 500 MB unpacked-size limit and a 10,000-file limit stop the scan with a clear error, zip-slip entries (absolute paths, `..`, symlinks) and a sub-folder path that escapes the archive are refused, a network timeout is applied, and the temporary folder is deleted even when the scan fails.
 
 Exit codes match a folder scan: `0` clean, `1` CRITICAL or HIGH, and `2` for a download or unpacking error. Scanning a local path stays fully offline; SkillShield only goes online when you give it a URL.
 

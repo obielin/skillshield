@@ -205,9 +205,9 @@ def cmd_scan(args) -> int:
     target = args.target
 
     # A GitHub URL is downloaded into a temporary folder and scanned while it exists.
-    if target.startswith("https://github.com/") or target.startswith("http://github.com/"):
-        from skillshield.download import DownloadError, fetch_github
+    from skillshield.download import DownloadError, fetch_github, is_github_url
 
+    if is_github_url(target):
         try:
             with fetch_github(target) as dl:
                 source = f"{target}{' (commit ' + dl.commit + ')' if dl.commit else ''}"

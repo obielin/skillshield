@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_UNPACKED_BYTES = 500 * 1024 * 1024  # 500 MB, guards against zip bombs
 MAX_ARCHIVE_FILES = 10_000
 DOWNLOAD_TIMEOUT = 30.0
 _GITHUB_HOSTS = {"github.com", "www.github.com"}
@@ -43,6 +44,12 @@ class DownloadedArchive:
     def __exit__(self, *exc) -> bool:
         shutil.rmtree(self.directory, ignore_errors=True)
         return False
+
+
+def is_github_url(target: str) -> bool:
+    """True when ``target`` is a github.com URL this module can download."""
+    parsed = urlparse(target)
+    return parsed.scheme in ("http", "https") and parsed.netloc.lower() in _GITHUB_HOSTS
 
 
 def parse_github_url(url: str) -> tuple[str, str, str | None, list[str]]:
@@ -111,13 +118,30 @@ def _safe_extract(data: bytes, destination: Path) -> None:
             infos = archive.infolist()
             if len(infos) > MAX_ARCHIVE_FILES:
                 raise DownloadError(f"archive contains more than {MAX_ARCHIVE_FILES} files")
+            total = 0
             for info in infos:
                 _check_zip_entry(info)
+                total += info.file_size
+                if total > MAX_UNPACKED_BYTES:
+                    raise DownloadError("archive unpacks to more than the 500 MB limit")
             archive.extractall(destination)
     except DownloadError:
         raise
     except Exception as exc:
         raise DownloadError(f"could not unpack archive: {exc}") from exc
+
+
+def _resolve_scan_dir(root: Path, subpath: list[str], url: str) -> Path:
+    """Join ``subpath`` onto ``root``, refusing anything that escapes it."""
+    for part in subpath:
+        if part in ("", ".", "..") or part.startswith("/") or re.match(r"^[a-zA-Z]:", part):
+            raise DownloadError(f"refused unsafe path segment {part!r} in {url}")
+    scan_dir = root.joinpath(*subpath).resolve()
+    if not scan_dir.is_relative_to(root.resolve()):
+        raise DownloadError(f"refused path outside the archive in {url}")
+    if not scan_dir.exists():
+        raise DownloadError(f"{url} does not contain the requested folder")
+    return scan_dir
 
 
 def fetch_github(url: str) -> DownloadedArchive:
@@ -128,11 +152,7 @@ def fetch_github(url: str) -> DownloadedArchive:
     try:
         _safe_extract(data, directory)
         root = next((entry for entry in directory.iterdir() if entry.is_dir()), directory)
-        scan_dir = root
-        for part in subpath:
-            scan_dir = scan_dir / part
-        if not scan_dir.exists():
-            raise DownloadError(f"{url} does not contain the requested folder")
+        scan_dir = _resolve_scan_dir(root, subpath, url)
         return DownloadedArchive(directory=directory, scan_dir=scan_dir, commit=commit, url=url)
     except BaseException:
         shutil.rmtree(directory, ignore_errors=True)
