@@ -15,7 +15,7 @@ from skillshield.rules import (
     RULE_COMPILED_PYTHON,
     Rule,
     Severity,
-    hidden_tag_match_lines,
+    hidden_tag_match_details,
     hidden_tag_text_with_lines,
 )
 
@@ -293,17 +293,21 @@ class SkillScanner:
             if not snippets and not found_hidden:
                 continue
             # Pattern hits can span lines or repeat, so a pattern rule reports the line of each
-            # match offset. check_fn rules return plain strings, so their snippets are located.
-            if not snippets:
+            # match offset. Other check_fn rules return plain strings, so their snippets are located.
+            if rule.id == "SG-008":
+                # These snippets are generated from invisible text and can share a visible prefix
+                # with unrelated source lines. Use their captured source locations instead.
+                unicode_matches = hidden_tag_match_details(text)
+                generated = {snippet for _, snippet in unicode_matches}
+                searchable = [snippet for snippet in snippets if snippet not in generated]
+                line_numbers = set(_find_all_line_numbers(text, searchable))
+                line_numbers.update(lineno for lineno, _ in unicode_matches)
+            elif not snippets:
                 line_numbers = set()
             elif rule.pattern is not None:
                 line_numbers = set(_pattern_line_numbers(text, rule.pattern))
             else:
                 line_numbers = set(_find_all_line_numbers(text, snippets))
-            if rule.id == "SG-008":
-                # The tag matches are generated snippets, so they are not in the text to be
-                # searched for; their lines come from the text.
-                line_numbers.update(hidden_tag_match_lines(text))
             # A match in the hidden text reports the lines whose characters it is made of.
             for match in found_hidden:
                 start = hidden.find(match)

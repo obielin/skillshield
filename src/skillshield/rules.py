@@ -861,7 +861,12 @@ def hidden_tag_text(text: str) -> str:
 def hidden_tag_match_lines(text: str) -> list[int]:
     """The lines of the SG-008 tag and variation selector matches, taken from the text and not
     from the snippets."""
-    return [lineno for lineno, _ in _hidden_tag_hits(text) + _variation_selector_hits(text)]
+    return [lineno for lineno, _ in hidden_tag_match_details(text)]
+
+
+def hidden_tag_match_details(text: str) -> list[tuple[int, str]]:
+    """The source line and generated snippet for each SG-008 invisible Unicode match."""
+    return _hidden_tag_hits(text) + _variation_selector_hits(text)
 
 
 def _hidden_tag_matches(text: str) -> list[str]:
@@ -913,11 +918,26 @@ def _decode_variation_selectors(run: str, limit: int | None = None) -> str:
     for c in run:
         b = ord(c) - 0xFE00 if ord(c) <= 0xFE0F else ord(c) - 0xE0100 + 16
         piece = chr(b) if 0x20 <= b < 0x7F else f"\\x{b:02x}"
+        if limit is not None and size + len(piece) > limit:
+            break
         pieces.append(piece)
         size += len(piece)
-        if limit is not None and size >= limit:
-            break
     return "".join(pieces)
+
+
+def _escape_control_characters(text: str) -> str:
+    """Keep terminal control characters out of snippets while leaving visible text intact."""
+    escaped = []
+    for char in text:
+        if char.isprintable():
+            escaped.append(char)
+        elif ord(char) <= 0xFF:
+            escaped.append(f"\\x{ord(char):02x}")
+        elif ord(char) <= 0xFFFF:
+            escaped.append(f"\\u{ord(char):04x}")
+        else:
+            escaped.append(f"\\U{ord(char):08x}")
+    return "".join(escaped)
 
 
 def _variation_selector_hits(text: str) -> list[tuple[int, str]]:
@@ -933,7 +953,7 @@ def _variation_selector_hits(text: str) -> list[tuple[int, str]]:
             if len(hidden) >= 80:
                 break
             hidden += _decode_variation_selectors(run, 80 - len(hidden))
-        visible = _VARIATION_RUN_RE.sub("", line).strip()[:60]
+        visible = _escape_control_characters(_VARIATION_RUN_RE.sub("", line).strip()[:60])
         matches.append(
             (
                 lineno,

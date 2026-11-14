@@ -1106,20 +1106,48 @@ class TestVariationSelectorSmuggling:
         # One selector after an emoji is normal, as are skin tones and a single text selector.
         assert RULE_OBFUSCATION.match("Love ❤️, ok ☺️, \U0001f44d\U0001f3fd") == []
 
+    def test_exactly_three_selectors_are_flagged_at_the_minimum_length(self):
+        hidden = "".join(chr(0xE0100 + byte - 16) for byte in b"ABC")
+        snippets = RULE_OBFUSCATION.match("x" + hidden)
+        assert len(snippets) == 1
+        assert 'decoding to "ABC"' in snippets[0]
+
     def test_a_long_run_decodes_only_the_displayed_prefix(self):
         from skillshield.rules import _decode_variation_selectors
 
         # Each NUL selector escapes to four characters, so 20 selectors fill the 80 shown.
         assert _decode_variation_selectors("︀" * 1_000_000, 80) == "\\x00" * 20
+        # Do not cut an escape in half when the remaining display budget is too small.
+        assert _decode_variation_selectors("︀", 3) == ""
 
     def test_control_bytes_in_a_hidden_run_are_escaped_before_display(self):
         # ESC and CR must not reach the terminal through the finding snippet.
-        hidden = "".join(chr(0xE0100 + b - 16) if b >= 16 else chr(0xFE00 + b) for b in b"\x1b[2J\r")
+        hidden = "".join(
+            chr(0xE0100 + b - 16) if b >= 16 else chr(0xFE00 + b) for b in b"\x1b[2J\r"
+        )
         snippets = RULE_OBFUSCATION.match("Thanks! \U0001f60a" + hidden)
         assert len(snippets) == 1
         assert "\x1b" not in snippets[0]
         assert "\r" not in snippets[0]
         assert "\\x1b[2J\\x0d" in snippets[0]
+
+    def test_control_characters_in_the_visible_prefix_are_escaped(self):
+        hidden = "".join(chr(0xE0100 + byte - 16) for byte in b"ABC")
+        snippets = RULE_OBFUSCATION.match("hello\tworld\x1b[2J" + hidden)
+        assert len(snippets) == 1
+        assert "\x1b" not in snippets[0]
+        assert "\t" not in snippets[0]
+        assert "hello\\x09world\\x1b[2J" in snippets[0]
+
+    def test_generated_snippet_prefix_does_not_add_unrelated_source_lines(self):
+        from skillshield.scanner import SkillScanner
+
+        hidden = "".join(chr(0xE0100 + byte - 16) for byte in b"ABC")
+        text = "a" * 40 + "\n" + "a" * 40 + hidden
+        findings = SkillScanner().scan_text(text).findings
+        sg008 = [finding for finding in findings if finding.rule_id == "SG-008"]
+        assert len(sg008) == 1
+        assert sg008[0].line_numbers == [2]
 
 
 class TestObfuscationRule:
