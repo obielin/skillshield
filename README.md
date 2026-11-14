@@ -260,23 +260,33 @@ A JSON file counts as a listing only when it also carries a sign that it comes f
 top-level `serverInfo` or `jsonrpc`, or a tool with an `inputSchema`. A file such as
 `{"tools": [{"name": "eslint"}]}` is ordinary JSON and is scanned as plain text.
 
-For example, save this to `files-server.json`:
+For example, save this read-only documentation server to `docs-server.json`. Its `path`
+parameter only accepts Markdown pages in `docs/`, so the agent cannot be steered to other files:
 
 ```json
 {
-  "serverInfo": {"name": "files", "version": "1.0.0"},
+  "serverInfo": {"name": "docs", "version": "1.0.0"},
   "transport": "stdio",
   "tools": [
     {
-      "name": "read_file",
-      "description": "Read a file.",
-      "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}},
+      "name": "read_doc",
+      "description": "Read one Markdown page from the project's docs folder.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {"path": {"type": "string", "pattern": "^docs/[a-z0-9_-]+\\.md$"}},
+        "required": ["path"]
+      },
       "annotations": {"readOnlyHint": true}
     },
     {
-      "name": "delete_file",
-      "description": "Delete a file.",
-      "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}}
+      "name": "search_docs",
+      "description": "Search the project's docs for a phrase.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {"query": {"type": "string", "maxLength": 200}},
+        "required": ["query"]
+      },
+      "annotations": {"readOnlyHint": true}
     }
   ]
 }
@@ -285,15 +295,15 @@ For example, save this to `files-server.json`:
 Then scan it:
 
 ```bash
-skillshield scan files-server.json
+skillshield scan docs-server.json
 ```
 
 ```text
-SAFE files-server.json
+SAFE docs-server.json
   Risk score:  0/100
   Findings:    0
-  Lines:       18
-  Scan time:   1.6ms
+  Lines:       27
+  Scan time:   3.1ms
   No security issues detected.
 ```
 
@@ -358,14 +368,11 @@ and never calls a tool: the scan works offline and sends nothing.
 
 That is 5 CRITICAL rules, 8 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
 
-The rules that read text, rather than the file as a whole, also run on a tool's name,
-description and input schema inside a saved MCP listing: a poisoned tool description is caught
-by SG-001, a tool that names a webhook by SG-002, and so on. Three rules cannot match a
-listing's fields at all, because what they look for is not in a field: SG-008, whose payloads
-are read from the whole file, SG-014, which looks for a compiled `.pyc` file, and SG-015, which
-reads the skill's frontmatter name. The rules that read the listing as a listing are numbered
-SG-101 onwards. None is registered in `ALL_RULES` yet, and no rule has a `listing_fn`, so each
-one is added to this table as it lands:
+In a saved MCP listing, the rules above read the file as it is saved, so a plain instruction
+in a tool's description is caught by SG-001 in the same way as in a skill. Text hidden behind
+JSON escape codes, such as `\u200b` inside a description, is not decoded yet; that is #134.
+The rules that check a listing's structure, rather than its text, are numbered SG-101 onwards.
+They are planned, and each one is added to this table as it lands:
 
 | Rule | Issue | Name | Status |
 |---|---|---|---|
