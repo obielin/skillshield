@@ -243,7 +243,10 @@ file, with no server involved.
 **Save the listing, then scan the file.** Save the response a server gives to `tools/list`,
 or the manifest the server ships, to a file and pass that file to `skillshield scan`. There
 is no flag to set and no server to reach: a `.json` file is always scanned, and a `.jsonl`
-file is scanned when it is a listing.
+file is scanned when it is a listing. For a `.jsonl` file, only the first 64 KB is read to
+decide whether it is a listing at all, so a data file that is not one is skipped without being
+read in full. A listing whose first record is larger than that is not recognised by that
+check.
 
 Three shapes are recognised:
 
@@ -355,20 +358,23 @@ and never calls a tool: the scan works offline and sends nothing.
 
 That is 5 CRITICAL rules, 8 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
 
-Every rule above reads text, so every one of them also runs on a tool's name, description and
-input schema inside a saved MCP listing: a poisoned tool description is caught by SG-001, a
-tool that names a webhook by SG-002, and so on. The rules that read the listing as a listing,
-rather than as text, are numbered SG-101 onwards, and each one is added to this table as it
-lands:
+The rules that read text, rather than the file as a whole, also run on a tool's name,
+description and input schema inside a saved MCP listing: a poisoned tool description is caught
+by SG-001, a tool that names a webhook by SG-002, and so on. Three rules cannot match a
+listing's fields at all, because what they look for is not in a field: SG-008, whose payloads
+are read from the whole file, SG-014, which looks for a compiled `.pyc` file, and SG-015, which
+reads the skill's frontmatter name. The rules that read the listing as a listing are numbered
+SG-101 onwards. None is registered in `ALL_RULES` yet, and no rule has a `listing_fn`, so each
+one is added to this table as it lands:
 
-| Rule | Issue | Name |
-|---|---|---|
-| SG-101 | #135 | Unsafe server authentication |
-| SG-102 | #136 | Over-broad tool permissions |
-| SG-103 | #137 | Unrestricted path parameter |
-| SG-104 | #138 | Suspicious tool name |
-| SG-105 | #139 | Tool with no description or input schema |
-| SG-106 | #140 | Excessive tool count |
+| Rule | Issue | Name | Status |
+|---|---|---|---|
+| SG-101 | #135 | Unsafe server authentication | planned |
+| SG-102 | #136 | Over-broad tool permissions | planned |
+| SG-103 | #137 | Unrestricted path parameter | planned |
+| SG-104 | #138 | Suspicious tool name | planned |
+| SG-105 | #139 | Tool with no description or input schema | planned |
+| SG-106 | #140 | Excessive tool count | planned |
 
 Every rule is tagged with the OWASP risks it relates to; see [SkillShield and agentic security](#skillshield-and-agentic-security).
 
