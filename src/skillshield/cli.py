@@ -211,6 +211,16 @@ def cmd_scan(args) -> int:
         try:
             with fetch_github(target) as dl:
                 source = f"{target}{' (commit ' + dl.commit + ')' if dl.commit else ''}"
+                if dl.skipped_links:
+                    # On stderr, so JSON and SARIF on stdout stay valid.
+                    shown = ", ".join(dl.skipped_links[:10])
+                    more = len(dl.skipped_links) - 10
+                    sys.stderr.write(
+                        f"Note: skipped {len(dl.skipped_links)} symbolic link(s) in the "
+                        f"archive, which were not scanned: {shown}"
+                        + (f" and {more} more" if more > 0 else "")
+                        + "\n"
+                    )
                 if dl.scan_dir.is_dir():
                     return _emit_batch(scanner.scan_directory(dl.scan_dir), args, source)
                 return _emit_single([scanner.scan_file(dl.scan_dir)], args, source)

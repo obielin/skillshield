@@ -106,7 +106,7 @@ skillshield scan https://github.com/owner/repo
 skillshield scan https://github.com/owner/repo/tree/main/skills/my-skill
 ```
 
-The URL may name a whole repository, a branch/tag/commit (`/tree/<ref>`), or a sub-folder inside it. The report names the URL and, when GitHub reports one, the exact commit that was scanned. Downloads are guarded: a 50 MB download limit, a 500 MB unpacked-size limit and a 10,000-file limit stop the scan with a clear error, zip-slip entries (absolute paths, `..`, symlinks) and a sub-folder path that escapes the archive are refused, a network timeout is applied, and the temporary folder is deleted even when the scan fails.
+The URL may name a whole repository, a branch/tag/commit (`/tree/<ref>`), or a sub-folder inside it. The report names the URL and, when GitHub reports one, the exact commit that was scanned. Downloads are guarded: a 50 MB download limit, a 500 MB unpacked-size limit and a 10,000-file limit stop the scan with a clear error, zip-slip entries (absolute paths, `..`) and a sub-folder path that escapes the archive are refused, symbolic links are never created (they are skipped and listed in a note, since skill repositories often contain them), a network timeout is applied, and the temporary folder is deleted even when the scan fails.
 
 Exit codes match a folder scan: `0` clean, `1` CRITICAL or HIGH, and `2` for a download or unpacking error. Scanning a local path stays fully offline; SkillShield only goes online when you give it a URL.
 

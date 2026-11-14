@@ -13,7 +13,7 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
@@ -39,6 +39,7 @@ class DownloadedArchive:
     scan_dir: Path
     commit: str | None
     url: str
+    skipped_links: list[str] = field(default_factory=list)
 
     def __enter__(self) -> "DownloadedArchive":
         return self
@@ -99,8 +100,12 @@ def _ref_exists(owner: str, repo: str, ref: str) -> bool:
     try:
         with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT):
             return True
-    except urllib.error.HTTPError:
-        return False
+    except urllib.error.HTTPError as exc:
+        # Only "not found" means the ref does not exist. Any other answer (rate limit,
+        # server error) is not proof either way, and guessing could scan the wrong ref.
+        if exc.code == 404:
+            return False
+        raise DownloadError(f"could not check ref {ref!r}: {exc}") from exc
     except Exception as exc:
         raise DownloadError(f"could not check ref {ref!r}: {exc}") from exc
 
@@ -139,7 +144,7 @@ def _download_archive(owner: str, repo: str, ref: str | None) -> tuple[bytes, st
             match = _COMMIT_RE.search(final)
             if match:
                 commit = next(group for group in match.groups() if group)
-            data = b""
+            data = bytearray()
             while True:
                 chunk = response.read(64 * 1024)
                 if not chunk:
@@ -147,7 +152,7 @@ def _download_archive(owner: str, repo: str, ref: str | None) -> tuple[bytes, st
                 data += chunk
                 if len(data) > MAX_DOWNLOAD_BYTES:
                     raise DownloadError("download exceeds the 50 MB limit")
-        return data, commit
+        return bytes(data), commit
     except DownloadError:
         raise
     except Exception as exc:
@@ -160,11 +165,19 @@ def _check_zip_entry(info: zipfile.ZipInfo) -> None:
         raise DownloadError(f"zip-slip refused: absolute path {info.filename!r}")
     if ".." in name.split("/"):
         raise DownloadError(f"zip-slip refused: '..' in {info.filename!r}")
-    if ((info.external_attr >> 16) & 0o170000) == 0o120000:
-        raise DownloadError(f"zip-slip refused: symlink {info.filename!r}")
 
 
-def _safe_extract(data: bytes, destination: Path) -> None:
+def _is_symlink(info: zipfile.ZipInfo) -> bool:
+    return ((info.external_attr >> 16) & 0o170000) == 0o120000
+
+
+def _safe_extract(data: bytes, destination: Path) -> list[str]:
+    """Unpack the archive, skipping symbolic links. Returns the links skipped.
+
+    A symbolic link is never created: it could point outside the folder. Links are
+    common in skill repositories (for example AGENTS.md pointing to CLAUDE.md), so
+    one link does not stop the scan; it is skipped and reported instead.
+    """
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             infos = archive.infolist()
@@ -176,7 +189,13 @@ def _safe_extract(data: bytes, destination: Path) -> None:
                 total += info.file_size
                 if total > MAX_UNPACKED_BYTES:
                     raise DownloadError("archive unpacks to more than the 500 MB limit")
-            archive.extractall(destination)
+            skipped: list[str] = []
+            for info in infos:
+                if _is_symlink(info):
+                    skipped.append(info.filename)
+                else:
+                    archive.extract(info, destination)
+            return skipped
     except DownloadError:
         raise
     except Exception as exc:
@@ -203,10 +222,14 @@ def fetch_github(url: str) -> DownloadedArchive:
     data, commit = _download_archive(owner, repo, ref)
     directory = Path(tempfile.mkdtemp(prefix="skillshield-"))
     try:
-        _safe_extract(data, directory)
+        skipped = _safe_extract(data, directory)
         root = next((entry for entry in directory.iterdir() if entry.is_dir()), directory)
         scan_dir = _resolve_scan_dir(root, subpath, url)
-        return DownloadedArchive(directory=directory, scan_dir=scan_dir, commit=commit, url=url)
+        prefix = f"{root.name}/"
+        links = [name.removeprefix(prefix) for name in skipped]
+        return DownloadedArchive(
+            directory=directory, scan_dir=scan_dir, commit=commit, url=url, skipped_links=links
+        )
     except BaseException:
         shutil.rmtree(directory, ignore_errors=True)
         raise

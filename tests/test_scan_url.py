@@ -196,29 +196,90 @@ def test_json_output_names_source(monkeypatch, patch_urlopen):
 
 @pytest.mark.parametrize(
     "kind",
-    ["size", "count", "dotdot", "absolute", "traversal", "symlink"],
+    ["size", "count", "dotdot", "absolute", "traversal"],
 )
 def test_defensive_limits_stop_scan(monkeypatch, patch_urlopen, kind):
-    if kind == "symlink":
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            info = zipfile.ZipInfo("repo-main/link")
-            info.external_attr = (0o120000 << 16) | 0o777
-            zf.writestr(info, b"target")
-        bad = buf.getvalue()
-    else:
-        bad = {
-            "size": b"x" * (download.MAX_DOWNLOAD_BYTES + 1),
-            "count": make_zip(
-                {f"repo-main/f{i}.md": b"x" for i in range(download.MAX_ARCHIVE_FILES + 1)}
-            ),
-            "dotdot": make_zip({"../evil.sh": b"x"}),
-            "absolute": make_zip({"/abs/evil.sh": b"x"}),
-            "traversal": make_zip({"repo-main/../../evil.sh": b"x"}),
-        }[kind]
+    bad = {
+        "size": b"x" * (download.MAX_DOWNLOAD_BYTES + 1),
+        "count": make_zip(
+            {f"repo-main/f{i}.md": b"x" for i in range(download.MAX_ARCHIVE_FILES + 1)}
+        ),
+        "dotdot": make_zip({"../evil.sh": b"x"}),
+        "absolute": make_zip({"/abs/evil.sh": b"x"}),
+        "traversal": make_zip({"repo-main/../../evil.sh": b"x"}),
+    }[kind]
     with patch_urlopen(bad):
         code, out = run_cli(monkeypatch, "scan", "https://github.com/owner/repo")
     assert code == 2 and "Error:" in out
+
+
+def _zip_with_link(extra=None):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("repo-main/skills/clean/SKILL.md", b"# clean\n")
+        info = zipfile.ZipInfo("repo-main/AGENTS.md")
+        info.external_attr = (0o120000 << 16) | 0o777
+        zf.writestr(info, b"CLAUDE.md")
+        for name, content in (extra or {}).items():
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+def test_symlink_is_skipped_and_reported(monkeypatch, patch_urlopen, capsys):
+    # A link is common in skill repositories, so it must not stop the scan.
+    with patch_urlopen(_zip_with_link()):
+        code, out = run_cli(monkeypatch, "scan", "https://github.com/owner/repo")
+    assert code == 0
+    assert "Error:" not in out
+    err = capsys.readouterr().err
+    assert "skipped 1 symbolic link(s)" in err and "AGENTS.md" in err
+
+
+def test_symlink_is_never_created(patch_urlopen):
+    with patch_urlopen(_zip_with_link()):
+        with download.fetch_github("https://github.com/owner/repo") as dl:
+            assert dl.skipped_links == ["AGENTS.md"]
+            assert not (dl.scan_dir / "AGENTS.md").exists()
+            assert (dl.scan_dir / "skills" / "clean" / "SKILL.md").is_file()
+
+
+def test_symlink_note_keeps_json_valid(monkeypatch, patch_urlopen):
+    import json
+
+    with patch_urlopen(_zip_with_link()):
+        code, out = run_cli(
+            monkeypatch, "scan", "https://github.com/owner/repo", "--format", "json"
+        )
+    assert code == 0
+    json.loads(out)
+
+
+def test_payload_next_to_symlink_is_still_found(monkeypatch, patch_urlopen):
+    evil = {"repo-main/skills/evil/SKILL.md": MALICIOUS.read_bytes()}
+    with patch_urlopen(_zip_with_link(evil)):
+        code, out = run_cli(monkeypatch, "scan", "https://github.com/owner/repo")
+    assert code == 1
+
+
+def test_ref_check_error_other_than_404_stops_scan(monkeypatch):
+    # A rate limit or server error is not proof that a ref is missing: guessing a
+    # shorter ref could scan the wrong files, so the scan stops instead.
+    def open_(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, 503, "Unavailable", {}, None)
+
+    with patch.object(download.urllib.request, "urlopen", side_effect=open_):
+        code, out = run_cli(
+            monkeypatch, "scan", "https://github.com/owner/repo/tree/release/v1/skills"
+        )
+    assert code == 2 and "503" in out
+
+
+def test_ref_check_404_tries_a_shorter_ref(patch_urlopen):
+    with patch_urlopen(skill_zip(), refs=("release/v1",)):
+        assert download._resolve_ref("owner", "repo", "release/v1/skills") == (
+            "release/v1",
+            ["skills"],
+        )
 
 
 def test_timeout_exits_2(monkeypatch, patch_urlopen):
