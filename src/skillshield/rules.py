@@ -901,12 +901,23 @@ def _hidden_tag_hits(text: str) -> list[tuple[int, str]]:
 _VARIATION_RUN_RE = re.compile("[\ufe00-\ufe0f\U000e0100-\U000e01ef]{3,}")
 
 
-def _decode_variation_selectors(run: str) -> str:
-    """The bytes that a run of variation selectors carries, shown as ASCII."""
-    data = bytes(ord(c) - 0xFE00 if ord(c) <= 0xFE0F else ord(c) - 0xE0100 + 16 for c in run)
-    # Escape every byte outside printable ASCII, so control bytes such as ESC or CR cannot
-    # reach the terminal through a finding snippet.
-    return "".join(chr(b) if 0x20 <= b < 0x7F else f"\\x{b:02x}" for b in data)
+def _decode_variation_selectors(run: str, limit: int | None = None) -> str:
+    """The bytes that a run of variation selectors carries, shown as ASCII.
+
+    Stops once at least ``limit`` characters are out, so a very long run costs no more than the
+    text that is shown. Every byte outside printable ASCII is escaped, so control bytes such as ESC
+    or CR cannot reach the terminal through a finding snippet.
+    """
+    pieces: list[str] = []
+    size = 0
+    for c in run:
+        b = ord(c) - 0xFE00 if ord(c) <= 0xFE0F else ord(c) - 0xE0100 + 16
+        piece = chr(b) if 0x20 <= b < 0x7F else f"\\x{b:02x}"
+        pieces.append(piece)
+        size += len(piece)
+        if limit is not None and size >= limit:
+            break
+    return "".join(pieces)
 
 
 def _variation_selector_hits(text: str) -> list[tuple[int, str]]:
@@ -917,7 +928,11 @@ def _variation_selector_hits(text: str) -> list[tuple[int, str]]:
         if not runs:
             continue
         count = sum(len(run) for run in runs)
-        hidden = "".join(_decode_variation_selectors(run) for run in runs)
+        hidden = ""
+        for run in runs:
+            if len(hidden) >= 80:
+                break
+            hidden += _decode_variation_selectors(run, 80 - len(hidden))
         visible = _VARIATION_RUN_RE.sub("", line).strip()[:60]
         matches.append(
             (
