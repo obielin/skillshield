@@ -870,8 +870,14 @@ def hidden_tag_text(text: str) -> str:
 
 
 def hidden_tag_match_lines(text: str) -> list[int]:
-    """The lines of the SG-008 tag matches, taken from the text and not from the snippets."""
-    return [lineno for lineno, _ in _hidden_tag_hits(text)]
+    """The lines of the SG-008 tag and variation selector matches, taken from the text and not
+    from the snippets."""
+    return [lineno for lineno, _ in hidden_tag_match_details(text)]
+
+
+def hidden_tag_match_details(text: str) -> list[tuple[int, str]]:
+    """The source line and generated snippet for each SG-008 invisible Unicode match."""
+    return _hidden_tag_hits(text) + _variation_selector_hits(text)
 
 
 def _hidden_tag_matches(text: str) -> list[str]:
@@ -900,6 +906,70 @@ def _hidden_tag_hits(text: str) -> list[tuple[int, str]]:
                 lineno,
                 f'{visible + " " if visible else ""}[line {lineno}: {count} invisible Unicode tag '
                 f'characters, decoding to "{hidden[:80]}"]',
+            )
+        )
+    return matches
+
+
+# Variation selectors (U+FE00 to U+FE0F and U+E0100 to U+E01EF) are not drawn either. One after a
+# character is normal ("❤️" is U+2764 then U+FE0F), but a run of three or more can carry one byte
+# per selector, as in Paul Butler's emoji smuggling (February 2025).
+_VARIATION_RUN_RE = re.compile("[\ufe00-\ufe0f\U000e0100-\U000e01ef]{3,}")
+
+
+def _decode_variation_selectors(run: str, limit: int | None = None) -> str:
+    """The bytes that a run of variation selectors carries, shown as ASCII.
+
+    Stops once at least ``limit`` characters are out, so a very long run costs no more than the
+    text that is shown. Every byte outside printable ASCII is escaped, so control bytes such as ESC
+    or CR cannot reach the terminal through a finding snippet.
+    """
+    pieces: list[str] = []
+    size = 0
+    for c in run:
+        b = ord(c) - 0xFE00 if ord(c) <= 0xFE0F else ord(c) - 0xE0100 + 16
+        piece = chr(b) if 0x20 <= b < 0x7F else f"\\x{b:02x}"
+        if limit is not None and size + len(piece) > limit:
+            break
+        pieces.append(piece)
+        size += len(piece)
+    return "".join(pieces)
+
+
+def _escape_control_characters(text: str) -> str:
+    """Keep terminal control characters out of snippets while leaving visible text intact."""
+    escaped = []
+    for char in text:
+        if char.isprintable():
+            escaped.append(char)
+        elif ord(char) <= 0xFF:
+            escaped.append(f"\\x{ord(char):02x}")
+        elif ord(char) <= 0xFFFF:
+            escaped.append(f"\\u{ord(char):04x}")
+        else:
+            escaped.append(f"\\U{ord(char):08x}")
+    return "".join(escaped)
+
+
+def _variation_selector_hits(text: str) -> list[tuple[int, str]]:
+    """The line and the match for each line with a run of three or more variation selectors."""
+    matches: list[tuple[int, str]] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        runs = [m[0] for m in _VARIATION_RUN_RE.finditer(line)]
+        if not runs:
+            continue
+        count = sum(len(run) for run in runs)
+        hidden = ""
+        for run in runs:
+            if len(hidden) >= 80:
+                break
+            hidden += _decode_variation_selectors(run, 80 - len(hidden))
+        visible = _escape_control_characters(_VARIATION_RUN_RE.sub("", line).strip()[:60])
+        matches.append(
+            (
+                lineno,
+                f'{visible + " " if visible else ""}[line {lineno}: {count} invisible variation '
+                f'selectors, decoding to "{hidden[:80]}"]',
             )
         )
     return matches
@@ -946,6 +1016,7 @@ def _check_obfuscation(text: str) -> list[str]:
         matches.append(f"{shown} [line {lineno}: {names}]")
 
     matches.extend(_hidden_tag_matches(text))
+    matches.extend(snippet for _, snippet in _variation_selector_hits(text))
     return matches
 
 
@@ -963,14 +1034,18 @@ RULE_OBFUSCATION = Rule(
         "Boucher and Anderson). Unicode tag characters (U+E0000-U+E007F) are not drawn "
         "on screen but a model can read them, so a skill can carry a whole hidden "
         "instruction in them (ASCII smuggling); the text they hide is decoded and "
-        "scanned with every rule."
+        "scanned with every rule. A run of three or more invisible variation selectors "
+        "(U+FE00-U+FE0F, U+E0100-U+E01EF) after a character can carry one byte per selector "
+        "(Paul Butler, emoji smuggling, February 2025); "
+        "a single selector after an emoji is normal."
     ),
     remediation=(
         "All skill instructions must be human-readable. Obfuscated content "
         "should be decoded and audited, or the skill should be rejected. Remove "
         "any bidirectional control characters; ordinary Arabic and Hebrew text "
         "does not need them. Remove any Unicode tag characters; only the emoji "
-        "flags of England, Scotland and Wales use them."
+        "flags of England, Scotland and Wales use them. Remove any run of variation "
+        "selectors, other than the one that follows an emoji."
     ),
     check_fn=_check_obfuscation,
     tags=["obfuscation", "evasion", "supply-chain", "owasp-asi01", "owasp-ast08"],
