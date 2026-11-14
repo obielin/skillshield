@@ -924,16 +924,22 @@ def _decode_variation_selectors(run: str, limit: int | None = None) -> str:
     text that is shown. Every byte outside printable ASCII is escaped, so control bytes such as ESC
     or CR cannot reach the terminal through a finding snippet.
     """
+    decoded, _ = _decode_variation_selectors_with_status(run, limit)
+    return decoded
+
+
+def _decode_variation_selectors_with_status(run: str, limit: int | None = None) -> tuple[str, bool]:
+    """Decode a run and report whether the display limit stopped it mid-run."""
     pieces: list[str] = []
     size = 0
     for c in run:
         b = ord(c) - 0xFE00 if ord(c) <= 0xFE0F else ord(c) - 0xE0100 + 16
         piece = chr(b) if 0x20 <= b < 0x7F else f"\\x{b:02x}"
         if limit is not None and size + len(piece) > limit:
-            break
+            return "".join(pieces), True
         pieces.append(piece)
         size += len(piece)
-    return "".join(pieces)
+    return "".join(pieces), False
 
 
 def _escape_control_characters(text: str) -> str:
@@ -963,7 +969,10 @@ def _variation_selector_hits(text: str) -> list[tuple[int, str]]:
         for run in runs:
             if len(hidden) >= 80:
                 break
-            hidden += _decode_variation_selectors(run, 80 - len(hidden))
+            decoded, truncated = _decode_variation_selectors_with_status(run, 80 - len(hidden))
+            hidden += decoded
+            if truncated:
+                break
         visible = _escape_control_characters(_VARIATION_RUN_RE.sub("", line).strip()[:60])
         matches.append(
             (
