@@ -11,6 +11,8 @@ import io
 import shutil
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -26,11 +28,16 @@ MALICIOUS = Path(__file__).parent / "fixtures" / "redteam" / "malicious" / "01-p
 
 
 class FakeResponse:
-    def __init__(self, data, commit=None):
+    def __init__(self, data, commit=None, etag=None):
         self._buf = data
         self._pos = 0
         self.commit = commit
-        self.headers = {"ETag": f'"{commit}"'} if commit else {}
+        if etag is not None:
+            self.headers = {"ETag": etag}
+        elif commit:
+            self.headers = {"ETag": f'"{commit}"'}
+        else:
+            self.headers = {}
 
     def read(self, n=-1):
         n = len(self._buf) - self._pos if n < 0 else n
@@ -50,6 +57,21 @@ class FakeResponse:
 
     def __exit__(self, *exc):
         return False
+
+
+def _fake_urlopen(data, commit=None, refs=("main",), etag=None):
+    """A ``urlopen`` double: HEAD probes answer only for ``refs``, GET returns ``data``."""
+
+    def open_(request, timeout=None):
+        url = request.full_url
+        ref = urllib.parse.unquote(url.split("/zip/", 1)[1]) if "/zip/" in url else None
+        if request.get_method() == "HEAD":
+            if ref in refs:
+                return FakeResponse(b"")
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        return FakeResponse(data, commit, etag=etag)
+
+    return open_
 
 
 def make_zip(entries):
@@ -81,9 +103,9 @@ def run_cli(monkeypatch, *argv):
 
 @pytest.fixture
 def patch_urlopen():
-    def install(data, commit=None):
+    def install(data, commit=None, refs=("main",), etag=None):
         return patch.object(
-            download.urllib.request, "urlopen", return_value=FakeResponse(data, commit)
+            download.urllib.request, "urlopen", side_effect=_fake_urlopen(data, commit, refs, etag)
         )
 
     return install
@@ -93,9 +115,20 @@ def patch_urlopen():
     "url,expected",
     [
         ("https://github.com/owner/repo", ("owner", "repo", None, [])),
+        # The ref may contain "/", so the whole tree tail is kept as the ref and
+        # the ref/subpath split is confirmed against GitHub later.
         (
             "https://github.com/owner/repo/tree/main/skills/my",
-            ("owner", "repo", "main", ["skills", "my"]),
+            ("owner", "repo", "main/skills/my", []),
+        ),
+        (
+            "https://github.com/owner/repo/tree/release/v1",
+            ("owner", "repo", "release/v1", []),
+        ),
+        # A percent-encoded space decodes to a real space in the ref tail.
+        (
+            "https://github.com/owner/repo/tree/main/skills/my%20skill",
+            ("owner", "repo", "main/skills/my skill", []),
         ),
         ("https://github.com/owner/repo.git", ("owner", "repo", None, [])),
     ],
@@ -206,12 +239,80 @@ def test_unpacked_size_cap_stops_scan(monkeypatch, patch_urlopen):
     [
         "https://github.com/owner/repo/tree/main/../..",
         "https://github.com/owner/repo/tree/main/skills/../../..",
+        # A percent-encoded ".." decodes to a real ".." and is still refused.
+        "https://github.com/owner/repo/tree/main/skills/%2e%2e/%2e%2e",
     ],
 )
 def test_subpath_escape_exits_2(monkeypatch, patch_urlopen, url):
     with patch_urlopen(skill_zip()):
         code, out = run_cli(monkeypatch, "scan", url)
     assert code == 2 and "Error:" in out
+
+
+def test_slash_branch_without_a_shorter_ref_resolves_to_the_full_ref():
+    # "release/v1" exists but "release" does not: the longest ref must win.
+    with patch.object(
+        download.urllib.request, "urlopen", side_effect=_fake_urlopen(b"", refs=("release/v1",))
+    ):
+        assert download._resolve_ref("owner", "repo", "release/v1") == ("release/v1", [])
+
+
+def test_slash_branch_keeps_its_subpath():
+    refs = ("release/v1",)
+    with patch.object(
+        download.urllib.request, "urlopen", side_effect=_fake_urlopen(b"", refs=refs)
+    ):
+        assert download._resolve_ref("owner", "repo", "release/v1/skills") == (
+            "release/v1",
+            ["skills"],
+        )
+
+
+def test_slash_branch_scans_the_correct_content(monkeypatch, patch_urlopen):
+    data = make_zip(
+        {
+            "repo-release-v1/skills/clean/SKILL.md": b"# clean\n",
+            "repo-release-v1/skills/evil/SKILL.md": MALICIOUS.read_bytes(),
+        }
+    )
+    url = "https://github.com/owner/repo/tree/release/v1/skills/clean"
+    with patch_urlopen(data, refs=("release/v1",)):
+        code, _ = run_cli(monkeypatch, "scan", url)
+    assert code == 0
+    with patch_urlopen(data, refs=("release/v1",)):
+        code, _ = run_cli(
+            monkeypatch, "scan", "https://github.com/owner/repo/tree/release/v1/skills/evil"
+        )
+    assert code == 1
+
+
+def test_unknown_ref_is_refused_not_scanned_under_a_wrong_one(monkeypatch, patch_urlopen):
+    url = "https://github.com/owner/repo/tree/nope/nope"
+    with patch_urlopen(skill_zip(), refs=("main",)):
+        code, out = run_cli(monkeypatch, "scan", url)
+    assert code == 2 and "Error:" in out
+
+
+def test_missing_commit_is_reported_as_unknown_not_the_etag(monkeypatch, patch_urlopen):
+    import json
+
+    # codeload's ETag is a 64-char digest; its first 40 chars are not a commit.
+    digest = "9f154fdfb7cb963d4a67739b2f32f2a286d7eb760a64309f1e47257cedd75f7d"
+    url = "https://github.com/owner/repo/tree/main"
+    with patch_urlopen(skill_zip(), commit=None, refs=("main",), etag=f'"{digest}"'):
+        code, out = run_cli(monkeypatch, "scan", url, "--format", "json")
+    assert code == 0
+    source = json.loads(out)["source"]
+    assert source == url
+    assert digest[:40] not in source and "commit" not in source
+
+
+def test_subpath_with_a_space_scans(monkeypatch, patch_urlopen):
+    data = make_zip({"repo-main/skills/my skill/SKILL.md": b"# clean\n"})
+    url = "https://github.com/owner/repo/tree/main/skills/my%20skill"
+    with patch_urlopen(data, refs=("main",)):
+        code, _ = run_cli(monkeypatch, "scan", url)
+    assert code == 0
 
 
 @contextmanager

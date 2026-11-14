@@ -10,19 +10,21 @@ import io
 import re
 import shutil
 import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse
 
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 MAX_UNPACKED_BYTES = 500 * 1024 * 1024  # 500 MB, guards against zip bombs
 MAX_ARCHIVE_FILES = 10_000
+MAX_REF_PROBES = 20  # bounds how many candidate refs a URL may resolve to
 DOWNLOAD_TIMEOUT = 30.0
 _GITHUB_HOSTS = {"github.com", "www.github.com"}
 _COMMIT_RE = re.compile(r"(?<=/zip/)([0-9a-f]{40})|(?<=/archive/)([0-9a-f]{40})")
-_SHA_RE = re.compile(r"[0-9a-f]{40}")
+_DRIVE_RE = re.compile(r"^[a-zA-Z]:")
 
 
 class DownloadError(Exception):
@@ -52,41 +54,91 @@ def is_github_url(target: str) -> bool:
     return parsed.scheme in ("http", "https") and parsed.netloc.lower() in _GITHUB_HOSTS
 
 
+def _is_unsafe_segment(part: str) -> bool:
+    """A path component that is empty or could escape its folder."""
+    return part in ("", ".", "..") or part.startswith("/") or _DRIVE_RE.match(part) is not None
+
+
+def _archive_url(owner: str, repo: str, ref: str | None) -> str:
+    """The codeload archive URL for a ref (``HEAD`` when none is given)."""
+    return f"https://codeload.github.com/{owner}/{repo}/zip/{quote(ref or 'HEAD', safe='/')}"
+
+
 def parse_github_url(url: str) -> tuple[str, str, str | None, list[str]]:
-    """Split a github.com URL into (owner, repo, ref, subpath)."""
+    """Split a github.com URL into (owner, repo, ref, subpath).
+
+    A ref may itself contain ``/`` (for example ``release/v1``), so
+    ``/tree/<ref>/<subpath>`` cannot be split by the URL alone. This keeps the
+    whole ``tree``/``blob`` tail as ``ref`` and leaves ``subpath`` empty; the
+    real split is confirmed against GitHub by :func:`_resolve_ref` and only that
+    split is used to pick the folder to scan.
+    """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or parsed.netloc.lower() not in _GITHUB_HOSTS:
         raise DownloadError(f"not a github.com URL: {url}")
-    segments = [s for s in parsed.path.split("/") if s]
+    segments = [unquote(s) for s in parsed.path.split("/") if s]
     if len(segments) < 2:
         raise DownloadError(f"not a repository URL: {url}")
     owner, repo = segments[0], segments[1].removesuffix(".git")
     if not repo:
         raise DownloadError(f"not a repository URL: {url}")
     ref = None
-    subpath: list[str] = []
     rest = segments[2:]
     if rest:
         if rest[0] not in ("tree", "blob") or len(rest) < 2:
             raise DownloadError(f"unsupported GitHub URL path: {url}")
-        ref = rest[1]
-        subpath = rest[2:]
-    return owner, repo, ref, subpath
+        ref = "/".join(rest[1:])
+    return owner, repo, ref, []
+
+
+def _ref_exists(owner: str, repo: str, ref: str) -> bool:
+    """Whether codeload serves an archive for ``ref`` (a cheap HEAD probe)."""
+    request = urllib.request.Request(
+        _archive_url(owner, repo, ref), method="HEAD", headers={"User-Agent": "skillshield"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT):
+            return True
+    except urllib.error.HTTPError:
+        return False
+    except Exception as exc:
+        raise DownloadError(f"could not check ref {ref!r}: {exc}") from exc
+
+
+def _resolve_ref(owner: str, repo: str, ref: str | None) -> tuple[str | None, list[str]]:
+    """Split ``ref`` into a confirmed ref and a subpath.
+
+    GitHub resolves a ``/tree/<ref>/<subpath>`` URL to the longest ref that
+    exists, so candidate refs are probed longest-first; the first that exists
+    wins and the remaining segments are the subpath. Nothing is guessed: if no
+    candidate exists the URL is refused rather than scanned under a wrong ref.
+    """
+    if ref is None:
+        return None, []
+    segments = ref.split("/")
+    for part in segments:
+        if _is_unsafe_segment(part):
+            raise DownloadError(f"refused unsafe ref segment {part!r} in {owner}/{repo}")
+    for i in range(min(len(segments), MAX_REF_PROBES), 0, -1):
+        candidate = "/".join(segments[:i])
+        if _ref_exists(owner, repo, candidate):
+            return candidate, segments[i:]
+    raise DownloadError(f"could not find a ref for {ref!r} in {owner}/{repo}")
 
 
 def _download_archive(owner: str, repo: str, ref: str | None) -> tuple[bytes, str | None]:
-    url = f"https://codeload.github.com/{owner}/{repo}/zip/{ref or 'HEAD'}"
+    url = _archive_url(owner, repo, ref)
     request = urllib.request.Request(url, headers={"User-Agent": "skillshield"})
     try:
         with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
+            # The commit is reported only when the final URL actually carries
+            # one (an explicit commit ref); codeload's ETag is a digest, not a
+            # commit, so it is never used.
             commit = None
             final = getattr(response, "geturl", lambda: "")()
             match = _COMMIT_RE.search(final)
             if match:
                 commit = next(group for group in match.groups() if group)
-            else:
-                sha = _SHA_RE.search(response.headers.get("ETag") or "")
-                commit = sha.group(0) if sha else None
             data = b""
             while True:
                 chunk = response.read(64 * 1024)
@@ -134,7 +186,7 @@ def _safe_extract(data: bytes, destination: Path) -> None:
 def _resolve_scan_dir(root: Path, subpath: list[str], url: str) -> Path:
     """Join ``subpath`` onto ``root``, refusing anything that escapes it."""
     for part in subpath:
-        if part in ("", ".", "..") or part.startswith("/") or re.match(r"^[a-zA-Z]:", part):
+        if _is_unsafe_segment(part):
             raise DownloadError(f"refused unsafe path segment {part!r} in {url}")
     scan_dir = root.joinpath(*subpath).resolve()
     if not scan_dir.is_relative_to(root.resolve()):
@@ -146,7 +198,8 @@ def _resolve_scan_dir(root: Path, subpath: list[str], url: str) -> Path:
 
 def fetch_github(url: str) -> DownloadedArchive:
     """Download a GitHub archive, unpack it safely, and point at the scan folder."""
-    owner, repo, ref, subpath = parse_github_url(url)
+    owner, repo, ref, _ = parse_github_url(url)
+    ref, subpath = _resolve_ref(owner, repo, ref)
     data, commit = _download_archive(owner, repo, ref)
     directory = Path(tempfile.mkdtemp(prefix="skillshield-"))
     try:
