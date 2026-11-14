@@ -96,82 +96,58 @@ def _print_result(result, verbose: bool = False, no_color: bool = False) -> None
     print()
 
 
-def cmd_scan(args) -> int:
-    from skillshield import SkillScanner
-    from skillshield.rules import Severity
+def _emit_batch(report, args, source: str | None = None) -> int:
+    """Render a batch report and return its exit code; ``source`` is a GitHub URL note."""
+    if args.format == "json":
+        out = {
+            "total": report.total_scanned,
+            "flagged": report.flagged_count,
+            "critical": report.critical_count,
+            "errors": report.error_count,
+            "flag_rate": report.flag_rate,
+            "unscanned": report.metadata.get("unscanned") or [],
+            "results": [
+                {
+                    "skill": r.skill_name,
+                    "risk_level": r.risk_level,
+                    "risk_score": r.risk_score,
+                    **({"error": r.error} if r.error else {}),
+                    "findings": [
+                        {
+                            "id": f.rule_id,
+                            "name": f.name,
+                            "severity": f.severity.value,
+                            "tags": f.rule.tags,
+                            "description": f.rule.description,
+                            "snippets": f.snippets[:3],
+                        }
+                        for f in r.findings
+                    ],
+                }
+                for r in report.results
+            ],
+        }
+        if source:
+            out["source"] = source
+        print(json.dumps(out, indent=2))
+    elif args.format == "sarif":
+        from skillshield.sarif import report_to_sarif
 
-    sev_map = {
-        "critical": Severity.CRITICAL,
-        "high": Severity.HIGH,
-        "medium": Severity.MEDIUM,
-        "low": Severity.LOW,
-        "info": Severity.INFO,
-    }
-    min_sev = sev_map.get(args.min_severity.lower(), Severity.INFO)
-    scanner = SkillScanner(min_severity=min_sev, verbose=args.verbose)
-
-    target = args.target
-
-    # stdin
-    if target == "-":
-        text = sys.stdin.read()
-        result = scanner.scan_text(text, name="<stdin>")
-        results = [result]
-
-    # directory
-    elif Path(target).is_dir():
-        report = scanner.scan_directory(target)
-        if args.format == "json":
-            out = {
-                "total": report.total_scanned,
-                "flagged": report.flagged_count,
-                "critical": report.critical_count,
-                "errors": report.error_count,
-                "flag_rate": report.flag_rate,
-                "unscanned": report.metadata.get("unscanned") or [],
-                "results": [
-                    {
-                        "skill": r.skill_name,
-                        "risk_level": r.risk_level,
-                        "risk_score": r.risk_score,
-                        **({"error": r.error} if r.error else {}),
-                        "findings": [
-                            {
-                                "id": f.rule_id,
-                                "name": f.name,
-                                "severity": f.severity.value,
-                                "tags": f.rule.tags,
-                                "description": f.rule.description,
-                                "snippets": f.snippets[:3],
-                            }
-                            for f in r.findings
-                        ],
-                    }
-                    for r in report.results
-                ],
-            }
-            print(json.dumps(out, indent=2))
-        elif args.format == "sarif":
-            from skillshield.sarif import report_to_sarif
-
-            print(json.dumps(report_to_sarif(report), indent=2))
-        else:
-            print(report.summary())
-        # Match single-file exit codes: unreadable files are 2; CRITICAL/HIGH are 1.
-        if report.error_count > 0:
-            return 2
-        return 1 if any(r.risk_level in ("CRITICAL", "HIGH") for r in report.results) else 0
-
-    # single file
-    elif Path(target).is_file():
-        result = scanner.scan_file(target)
-        results = [result]
-
+        log = report_to_sarif(report)
+        if source:
+            log["runs"][0].setdefault("properties", {})["source"] = source
+        print(json.dumps(log, indent=2))
     else:
-        print(f"Error: {target} not found")
+        if source:
+            print(source)
+        print(report.summary())
+    if report.error_count > 0:
         return 2
+    return 1 if any(r.risk_level in ("CRITICAL", "HIGH") for r in report.results) else 0
 
-    # Output single result
+
+def _emit_single(results, args, source: str | None = None) -> int:
+    """Render a single result and return its exit code; ``source`` is a GitHub URL note."""
     if args.format == "json":
         out = {
             "skill": results[0].skill_name,
@@ -192,19 +168,77 @@ def cmd_scan(args) -> int:
                 for f in results[0].findings
             ],
         }
+        if source:
+            out["source"] = source
         print(json.dumps(out, indent=2))
     elif args.format == "sarif":
         from skillshield.sarif import results_to_sarif
 
-        print(json.dumps(results_to_sarif(results), indent=2))
+        log = results_to_sarif(results)
+        if source:
+            log["runs"][0].setdefault("properties", {})["source"] = source
+        print(json.dumps(log, indent=2))
     else:
+        if source:
+            print(source)
         for result in results:
             _print_result(result, verbose=args.verbose, no_color=getattr(args, "no_color", False))
-
-    # A file the scanner could not read must not look like a clean pass in CI; 2 also means "not found".
     if results[0].risk_level == "ERROR":
         return 2
     return 1 if results[0].risk_level in ("CRITICAL", "HIGH") else 0
+
+
+def cmd_scan(args) -> int:
+    from skillshield import SkillScanner
+    from skillshield.rules import Severity
+
+    sev_map = {
+        "critical": Severity.CRITICAL,
+        "high": Severity.HIGH,
+        "medium": Severity.MEDIUM,
+        "low": Severity.LOW,
+        "info": Severity.INFO,
+    }
+    min_sev = sev_map.get(args.min_severity.lower(), Severity.INFO)
+    scanner = SkillScanner(min_severity=min_sev, verbose=args.verbose)
+
+    target = args.target
+
+    # A GitHub URL is downloaded into a temporary folder and scanned while it exists.
+    if target.startswith("https://github.com/") or target.startswith("http://github.com/"):
+        from skillshield.download import DownloadError, fetch_github
+
+        try:
+            with fetch_github(target) as dl:
+                source = f"{target}{' (commit ' + dl.commit + ')' if dl.commit else ''}"
+                if dl.scan_dir.is_dir():
+                    return _emit_batch(scanner.scan_directory(dl.scan_dir), args, source)
+                return _emit_single([scanner.scan_file(dl.scan_dir)], args, source)
+        except DownloadError as exc:
+            print(f"Error: {exc}")
+            return 2
+
+    # stdin
+    if target == "-":
+        text = sys.stdin.read()
+        result = scanner.scan_text(text, name="<stdin>")
+        results = [result]
+
+    # directory
+    elif Path(target).is_dir():
+        return _emit_batch(scanner.scan_directory(target), args)
+
+    # single file
+    elif Path(target).is_file():
+        result = scanner.scan_file(target)
+        results = [result]
+
+    else:
+        print(f"Error: {target} not found")
+        return 2
+
+    # Output single result
+    return _emit_single(results, args)
 
 
 def cmd_check(args) -> int:
@@ -265,8 +299,8 @@ Examples:
     sub = p.add_subparsers(dest="command", required=True)
 
     # scan
-    p_scan = sub.add_parser("scan", help="Scan a skill file, directory, or stdin")
-    p_scan.add_argument("target", help="File, directory, or - for stdin")
+    p_scan = sub.add_parser("scan", help="Scan a skill file, directory, GitHub URL, or stdin")
+    p_scan.add_argument("target", help="File, directory, GitHub URL, or - for stdin")
     p_scan.add_argument("--format", choices=["text", "json", "sarif"], default="text")
     p_scan.add_argument(
         "--min-severity",
