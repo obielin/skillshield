@@ -904,7 +904,9 @@ _VARIATION_RUN_RE = re.compile("[\ufe00-\ufe0f\U000e0100-\U000e01ef]{3,}")
 def _decode_variation_selectors(run: str) -> str:
     """The bytes that a run of variation selectors carries, shown as ASCII."""
     data = bytes(ord(c) - 0xFE00 if ord(c) <= 0xFE0F else ord(c) - 0xE0100 + 16 for c in run)
-    return data.decode("ascii", errors="backslashreplace")
+    # Escape every byte outside printable ASCII, so control bytes such as ESC or CR cannot
+    # reach the terminal through a finding snippet.
+    return "".join(chr(b) if 0x20 <= b < 0x7F else f"\\x{b:02x}" for b in data)
 
 
 def _variation_selector_hits(text: str) -> list[tuple[int, str]]:
@@ -987,7 +989,8 @@ RULE_OBFUSCATION = Rule(
         "on screen but a model can read them, so a skill can carry a whole hidden "
         "instruction in them (ASCII smuggling); the text they hide is decoded and "
         "scanned with every rule. A run of three or more invisible variation selectors "
-        "(U+FE00-U+FE0F, U+E0100-U+E01EF) after a character can carry one byte per selector; "
+        "(U+FE00-U+FE0F, U+E0100-U+E01EF) after a character can carry one byte per selector "
+        "(Paul Butler, emoji smuggling, February 2025); "
         "a single selector after an emoji is normal."
     ),
     remediation=(

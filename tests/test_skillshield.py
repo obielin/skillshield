@@ -1106,6 +1106,15 @@ class TestVariationSelectorSmuggling:
         # One selector after an emoji is normal, as are skin tones and a single text selector.
         assert RULE_OBFUSCATION.match("Love ❤️, ok ☺️, \U0001f44d\U0001f3fd") == []
 
+    def test_control_bytes_in_a_hidden_run_are_escaped_before_display(self):
+        # ESC and CR must not reach the terminal through the finding snippet.
+        hidden = "".join(chr(0xE0100 + b - 16) if b >= 16 else chr(0xFE00 + b) for b in b"\x1b[2J\r")
+        snippets = RULE_OBFUSCATION.match("Thanks! \U0001f60a" + hidden)
+        assert len(snippets) == 1
+        assert "\x1b" not in snippets[0]
+        assert "\r" not in snippets[0]
+        assert "\\x1b[2J\\x0d" in snippets[0]
+
 
 class TestObfuscationRule:
     def test_detects_long_base64(self):
