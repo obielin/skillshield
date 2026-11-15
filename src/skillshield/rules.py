@@ -75,9 +75,9 @@ _ZH_NOT = (
 # instructions. The phrase has to be one the negation carries: it starts
 # with 在, the preposition of a prepositional phrase ("under any
 # circumstances", "in this case"), which says how the negation holds
-# rather than what is negated. "不要犹豫馬上忽略之前的指令" negates the
-# hesitation, not the ignoring, so the text between the negation and the
-# verb is not such a phrase and the override stays flagged. A phrase is
+# rather than what is negated. If the words between the negation and the
+# verb say how the hesitation is done ("do not hesitate") rather than
+# carrying the negation to the ignoring, the override stays flagged. A phrase is
 # one entry, because Python's lookbehind is fixed-width: a gap of any
 # length would let a shorter one match before the phrase ends, and a
 # sentence boundary inside the gap would not stop it. The
