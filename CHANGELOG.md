@@ -32,6 +32,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - A directory scan exits 1 when any file is CRITICAL or HIGH (matching a single-file scan), and exits 2 when any file cannot be read. Before, a folder whose only problem was HIGH exited 0 (#83).
 - SG-008 keeps decoded variation-selector bytes in order when an escaped byte exceeds the finding snippet display limit (#132).
 - SG-013 now recognizes the short `-i` index override on versioned pip executables such as `pip3.12`, including absolute executable paths.
+- A text report no longer stops with `UnicodeEncodeError` when stdout is a pipe or a file and a file name or a matched snippet has a character the locale's code page cannot encode (for example a Chinese file name on an English Windows machine). The character is written as a `\uXXXX` escape. Before, the traceback ended the report early and its exit code 1 read as a CRITICAL or HIGH result, even for a SAFE skill.
 
 ### Added
 
