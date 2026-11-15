@@ -16,6 +16,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - SG-002 now flags code that sends the whole environment over HTTP, which usually carries API keys: `dict(os.environ)`, `os.environ.copy()`, `json.dumps(os.environ)`, `{**os.environ}`, `JSON.stringify(process.env)` and `{...process.env}`, within a few lines of a call such as `requests.post`, `httpx.post`, `urllib.request.urlopen`, `fetch(` or `axios.post`. Reading one variable (`os.environ.get("HOME")`, `process.env.HOME`) is not flagged (#33).
 - JSON output now includes each finding's `tags`, for one file and for a directory, so findings can be filtered by OWASP risk.
 - SG-008 now flags runs of three or more invisible variation selectors (U+FE00 to U+FE0F and U+E0100 to U+E01EF) after a character, which can carry one hidden byte per selector (Paul Butler's emoji smuggling). The decoded text is shown with control bytes escaped. A single selector after an emoji is normal and is not flagged (#107).
+- Regression coverage for the 50-snippet line-number lookup cap on check-function rules (#112).
 
 ### Changed
 
