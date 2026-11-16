@@ -181,7 +181,7 @@ class TestMultiAgentDiscoveryAndReports:
 
         first = run["results"][0]
         artifact = first["locations"][0]["physicalLocation"]["artifactLocation"]
-        assert artifact["uri"] == str(malicious_path).replace("\\", "/")
+        assert artifact["uri"] == malicious_path.as_uri()
         assert "uriBaseId" not in artifact
         assert first["properties"]["agent"] == "Codex"
         assert first["properties"]["path"] == str(malicious_path)
@@ -439,3 +439,94 @@ class TestSymlinksDedupeAndErrors:
         assert "SG-014" in out
         assert "UNSCANNED (1)" in out
         assert str((skill_dir / "archive.zip").resolve()) in out
+
+    def test_compiled_alias_over_text_target_stays_compiled(
+        self, isolated_env, monkeypatch, capsys
+    ):
+        home, _ = isolated_env
+        skill_dir = home / ".claude" / "skills" / "alias-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            CLEAN_SAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        blob = skill_dir / "blob.txt"
+        blob.write_text("harmless notes\n", encoding="utf-8")
+        try:
+            (skill_dir / "payload.pyc").symlink_to(blob)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not permitted in this environment")
+
+        code = _run_cli(monkeypatch, "scan", "--installed", "--format", "json")
+        payload = json.loads(capsys.readouterr().out)
+
+        assert code == 1
+        compiled = [
+            item
+            for item in payload["results"]
+            if any(finding["id"] == "SG-014" for finding in item["findings"])
+        ]
+        assert len(compiled) == 1
+        # The alias the agent loads is reported, not the harmless text target.
+        assert compiled[0]["path"].endswith("payload.pyc")
+        assert payload["total"] == 2
+
+    def test_unreadable_skill_directory_exits_2(self, isolated_env, monkeypatch, capsys):
+        if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):
+            pytest.skip("chmod 0o000 does not block reads for root or on Windows")
+        home, _ = isolated_env
+        locked = home / ".claude" / "skills" / "locked"
+        locked.mkdir(parents=True)
+        (locked / "SKILL.md").write_text("secret", encoding="utf-8")
+        locked.chmod(0o000)
+        try:
+            code = _run_cli(monkeypatch, "scan", "--installed", "--no-color")
+            out = capsys.readouterr().out
+            assert code == 2
+            assert "Unreadable:       1" in out
+            assert "[ERROR] locked" in out
+            assert str(locked) in out
+        finally:
+            locked.chmod(0o755)
+
+    def test_invalid_utf8_plugin_inventory_falls_back(self, isolated_env, monkeypatch, capsys):
+        home, _ = isolated_env
+        plugins = home / ".claude" / "plugins"
+        _write_skill(
+            plugins / "demo-plugin" / "skills",
+            "demo",
+            CLEAN_SAMPLE.read_text(encoding="utf-8"),
+        )
+        (plugins / "installed_plugins.json").write_bytes(b"\xff\xfe not json")
+
+        code = _run_cli(monkeypatch, "scan", "--installed", "--format", "json")
+        payload = json.loads(capsys.readouterr().out)
+
+        assert code == 0
+        assert payload["total"] == 1
+        assert payload["results"][0]["agent"] == "Claude Code"
+        assert payload["results"][0]["path"].endswith("SKILL.md")
+
+    def test_sarif_uri_encodes_reserved_characters_in_installed_path(
+        self, isolated_env, monkeypatch, capsys
+    ):
+        home, _ = isolated_env
+        _write_skill(
+            home / ".claude" / "skills",
+            "review #1",
+            MALICIOUS_SAMPLE.read_text(encoding="utf-8"),
+        )
+
+        code = _run_cli(monkeypatch, "scan", "--installed", "--format", "sarif")
+        sarif = json.loads(capsys.readouterr().out)
+
+        assert code == 1
+        uris = [
+            location["physicalLocation"]["artifactLocation"]["uri"]
+            for run in sarif["runs"]
+            for result in run["results"]
+            for location in result["locations"]
+        ]
+        assert uris
+        assert all(uri.startswith("file://") for uri in uris)
+        assert all("%20" in uri and "%23" in uri for uri in uris)
+        assert all("#" not in uri for uri in uris)

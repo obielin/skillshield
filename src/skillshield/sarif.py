@@ -10,6 +10,7 @@ Reference: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from skillshield import __version__
@@ -58,9 +59,17 @@ def _artifact_uri(skill_name: str) -> str:
     """
     Normalise a skill_name to a URI suitable for SARIF artifactLocation.
 
-    Backslashes are converted to forward slashes; absolute paths are kept
-    as-is so that GitHub's path-matching still works.
+    Absolute paths (installed skills) become percent-encoded ``file:`` URIs so
+    spaces, ``#``, and other reserved characters keep their meaning. Relative
+    skill names keep the plain forward-slash form that GitHub path-matching
+    expects.
     """
+    path = Path(skill_name)
+    try:
+        if path.is_absolute():
+            return path.as_uri()
+    except (OSError, ValueError):
+        pass
     return skill_name.replace("\\", "/")
 
 

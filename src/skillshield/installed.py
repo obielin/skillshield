@@ -73,9 +73,22 @@ class _CandidateFile:
     location: InstalledLocation
     skill_root: Path
     skill_name: str
+    entry_path: Path
+    entry_suffix: str
     resolved_path: Path
     is_compiled: bool
-    priority: tuple[bool, int, int, int]
+    priority: tuple[bool, bool, int, int, int]
+
+
+@dataclass
+class _DiscoveryError:
+    """A directory that could not be read, so the scan cannot vouch for it."""
+
+    location_index: int
+    location: InstalledLocation
+    skill_root: Path
+    path: Path
+    message: str
 
 
 def _codex_project_dirs(cwd: Path) -> list[Path]:
@@ -205,27 +218,57 @@ def discover_locations(
     return unique
 
 
-def _find_skills_subdirs(root: Path) -> list[Path]:
-    """Walk ``root`` following symlinks (cycle-safe) and return ``skills`` dirs."""
+def _stat_dir(path: Path) -> tuple[bool, str]:
+    """Whether ``path`` is a directory, and why it could not be read if it is not.
+
+    A path that does not exist is a missing location and stays quiet: it returns
+    ``(False, "")``. Any other failure (a permission error, say) returns the
+    message, because the scan cannot vouch for a directory it could not open.
+    """
+    try:
+        st = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False, ""
+    except OSError as exc:
+        return False, str(exc)
+    return stat.S_ISDIR(st.st_mode), "" if stat.S_ISDIR(st.st_mode) else "not a directory"
+
+
+def _find_skills_subdirs(root: Path) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """Walk ``root`` following symlinks (cycle-safe) and return ``skills`` dirs.
+
+    Returns the directories found and the ``(path, message)`` pairs for any
+    directory that could not be read.
+    """
+    is_dir, problem = _stat_dir(root)
+    if problem:
+        return [], [(root, problem)]
+    if not is_dir:
+        return [], []
+
     try:
         root_stat = os.stat(root)
-    except OSError:
-        return []
-    if not stat.S_ISDIR(root_stat.st_mode):
-        return []
+    except OSError as exc:
+        return [], [(root, str(exc))]
 
     visited: set[tuple[int, int]] = {(root_stat.st_dev, root_stat.st_ino)}
     found: list[Path] = []
+    errors: list[tuple[Path, str]] = []
 
     def _walk(directory: Path) -> None:
         try:
             entries = sorted(os.scandir(directory), key=lambda e: e.name)
-        except OSError:
+        except OSError as exc:
+            errors.append((directory, str(exc)))
             return
         for entry in entries:
             try:
                 st = os.stat(entry.path)
-            except OSError:
+            except (FileNotFoundError, NotADirectoryError):
+                # A broken or dangling link names no skills directory.
+                continue
+            except OSError as exc:
+                errors.append((Path(entry.path), str(exc)))
                 continue
             if not stat.S_ISDIR(st.st_mode):
                 continue
@@ -243,14 +286,16 @@ def _find_skills_subdirs(root: Path) -> list[Path]:
             _walk(entry_path)
 
     _walk(root)
-    return found
+    return found, errors
 
 
 def _extract_install_paths(installed_json: Path) -> list[Path] | None:
     """Read plugin ``installPath`` directories from Claude's ``installed_plugins.json``."""
     try:
         data = json.loads(installed_json.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        # A malformed inventory falls back to walking the plugins directory, so
+        # an unrelated agent still gets scanned.
         return None
     if not isinstance(data, dict):
         return None
@@ -267,13 +312,21 @@ def _extract_install_paths(installed_json: Path) -> list[Path] | None:
     return paths
 
 
-def _claude_plugin_skill_roots(plugins_dir: Path) -> list[Path]:
-    """Find ``skills`` folders inside installed Claude Code plugins."""
-    if not plugins_dir.is_dir():
-        return []
+def _claude_plugin_skill_roots(plugins_dir: Path) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """Find ``skills`` folders inside installed Claude Code plugins.
+
+    Returns the roots and the ``(path, message)`` pairs for any directory that
+    could not be read.
+    """
+    is_dir, problem = _stat_dir(plugins_dir)
+    if problem:
+        return [], [(plugins_dir, problem)]
+    if not is_dir:
+        return [], []
 
     installed_json = plugins_dir / "installed_plugins.json"
     roots: list[Path] = []
+    errors: list[tuple[Path, str]] = []
     if installed_json.is_file():
         install_paths = _extract_install_paths(installed_json)
         if install_paths is not None:
@@ -282,10 +335,15 @@ def _claude_plugin_skill_roots(plugins_dir: Path) -> list[Path]:
                 if skills_dir.is_dir():
                     roots.append(skills_dir)
                 else:
-                    roots.extend(_find_skills_subdirs(install_path))
-            return _dedupe_dirs_by_inode(roots)
+                    found, failed = _find_skills_subdirs(install_path)
+                    roots.extend(found)
+                    errors.extend(failed)
+            return _dedupe_dirs_by_inode(roots), errors
 
-    return _dedupe_dirs_by_inode(_find_skills_subdirs(plugins_dir))
+    found, failed = _find_skills_subdirs(plugins_dir)
+    roots.extend(found)
+    errors.extend(failed)
+    return _dedupe_dirs_by_inode(roots), errors
 
 
 def _dedupe_dirs_by_inode(dirs: list[Path]) -> list[Path]:
@@ -306,31 +364,44 @@ def _dedupe_dirs_by_inode(dirs: list[Path]) -> list[Path]:
     return unique
 
 
-def _walk_files(root: Path) -> list[tuple[Path, Path, bool]]:
-    """Return ``(entry_path, resolved_path, via_symlink)`` for all files under ``root``.
+def _walk_files(root: Path) -> tuple[list[tuple[Path, Path, bool]], list[tuple[Path, str]]]:
+    """Return files and unreadable directories under ``root``.
 
-    Follows symbolic links with cycle protection keyed by ``(st_dev, st_ino)``.
+    Files are ``(entry_path, resolved_path, via_symlink)``. Symbolic links are
+    followed with cycle protection keyed by ``(st_dev, st_ino)``; a directory
+    that cannot be opened is returned as ``(path, message)`` instead of being
+    dropped, so the report can say the scan is incomplete.
     """
+    is_dir, problem = _stat_dir(root)
+    if problem:
+        return [], [(root, problem)]
+    if not is_dir:
+        return [], []
+
     try:
         root_stat = os.stat(root)
-    except OSError:
-        return []
-    if not stat.S_ISDIR(root_stat.st_mode):
-        return []
+    except OSError as exc:
+        return [], [(root, str(exc))]
 
     visited_dirs: set[tuple[int, int]] = {(root_stat.st_dev, root_stat.st_ino)}
     collected: list[tuple[Path, Path, bool]] = []
+    errors: list[tuple[Path, str]] = []
 
     def _walk(directory: Path, via_symlink: bool) -> None:
         try:
             entries = sorted(os.scandir(directory), key=lambda e: e.name)
-        except OSError:
+        except OSError as exc:
+            errors.append((directory, str(exc)))
             return
         for entry in entries:
             entry_via_symlink = via_symlink or entry.is_symlink()
             try:
                 st = os.stat(entry.path)
-            except OSError:
+            except (FileNotFoundError, NotADirectoryError):
+                # A broken or dangling link names no file to scan.
+                continue
+            except OSError as exc:
+                errors.append((Path(entry.path), str(exc)))
                 continue
             entry_path = Path(entry.path)
             if stat.S_ISDIR(st.st_mode):
@@ -347,7 +418,7 @@ def _walk_files(root: Path) -> list[tuple[Path, Path, bool]]:
                 collected.append((entry_path, resolved, entry_via_symlink))
 
     _walk(root, root.is_symlink())
-    return collected
+    return collected, errors
 
 
 def scan_installed(
@@ -363,30 +434,55 @@ def scan_installed(
 
     chosen_files: dict[Path, _CandidateFile] = {}
     chosen_unscanned: set[Path] = set()
+    discovery_errors: list[_DiscoveryError] = []
 
     for loc_idx, loc in enumerate(locations):
         if loc.is_plugins_dir:
-            roots = _claude_plugin_skill_roots(loc.path)
-        elif loc.path.is_dir():
-            roots = [loc.path]
+            roots, failed = _claude_plugin_skill_roots(loc.path)
         else:
-            roots = []
+            is_dir, problem = _stat_dir(loc.path)
+            roots = [loc.path] if is_dir else []
+            failed = [(loc.path, problem)] if problem else []
+        for path, message in failed:
+            discovery_errors.append(
+                _DiscoveryError(
+                    location_index=loc_idx,
+                    location=loc,
+                    skill_root=loc.path,
+                    path=path,
+                    message=message,
+                )
+            )
 
         for skill_root in roots:
-            for entry_path, resolved_path, via_symlink in _walk_files(skill_root):
+            walked, failed = _walk_files(skill_root)
+            for path, message in failed:
+                discovery_errors.append(
+                    _DiscoveryError(
+                        location_index=loc_idx,
+                        location=loc,
+                        skill_root=skill_root,
+                        path=path,
+                        message=message,
+                    )
+                )
+            for entry_path, resolved_path, via_symlink in walked:
                 entry_ext = entry_path.suffix.lower()
                 resolved_ext = resolved_path.suffix.lower()
-                is_scannable = (
+                # Compiled Python wins over a text suffix: a skill can ship a
+                # payload.pyc symlink pointing at a .txt file, and reading it as
+                # text would hide the bytecode the agent would actually run.
+                is_compiled = (
+                    entry_ext in COMPILED_PYTHON_EXTENSIONS
+                    or resolved_ext in COMPILED_PYTHON_EXTENSIONS
+                )
+                is_scannable = not is_compiled and (
                     entry_ext in exts
                     or resolved_ext in exts
                     or _is_agent_rule_file(entry_path)
                     or _is_agent_rule_file(resolved_path)
                     or _is_tool_listing_file(resolved_path)
                 )
-                is_compiled = (
-                    entry_ext in COMPILED_PYTHON_EXTENSIONS
-                    or resolved_ext in COMPILED_PYTHON_EXTENSIONS
-                ) and not is_scannable
 
                 if not is_scannable and not is_compiled:
                     chosen_unscanned.add(resolved_path)
@@ -395,6 +491,7 @@ def scan_installed(
                 rel = entry_path.relative_to(skill_root)
                 skill_name = rel.parts[0] if len(rel.parts) > 1 else rel.name
                 priority = (
+                    is_compiled,
                     not via_symlink,
                     loc.scope_rank,
                     len(skill_root.parts),
@@ -407,6 +504,8 @@ def scan_installed(
                         location=loc,
                         skill_root=skill_root,
                         skill_name=skill_name,
+                        entry_path=entry_path,
+                        entry_suffix=entry_ext,
                         resolved_path=resolved_path,
                         is_compiled=is_compiled,
                         priority=priority,
@@ -439,15 +538,26 @@ def scan_installed(
     entries: list[InstalledSkillEntry] = []
     results: list[SkillScanResult] = []
     for item in ordered:
+        if item.is_compiled:
+            # Name the file the agent ships when the compiled suffix is on the
+            # entry itself, so a payload.pyc alias is reported as such and its
+            # source is looked for beside it, not beside a text target.
+            scan_target = (
+                item.entry_path
+                if item.entry_suffix in COMPILED_PYTHON_EXTENSIONS
+                else item.resolved_path
+            )
+        else:
+            scan_target = item.resolved_path
         active_scanner._log(
-            f"  Scanning {item.resolved_path} ({item.location.agent}: {item.skill_name})..."
+            f"  Scanning {scan_target} ({item.location.agent}: {item.skill_name})..."
         )
         if item.is_compiled:
-            result = active_scanner._scan_compiled_file(item.resolved_path)
+            result = active_scanner._scan_compiled_file(scan_target)
         else:
-            result = active_scanner.scan_file(item.resolved_path)
+            result = active_scanner.scan_file(scan_target)
         result.agent = item.location.agent
-        result.file_path = str(item.resolved_path)
+        result.file_path = str(scan_target)
         result.skill_name = item.skill_name
         skill_key = (item.location_index, str(item.skill_root), item.skill_name)
         entries.append(
@@ -455,6 +565,37 @@ def scan_installed(
                 location_index=item.location_index,
                 skill_key=skill_key,
                 skill_name=item.skill_name,
+                result=result,
+            )
+        )
+        results.append(result)
+
+    seen_errors: set[str] = set()
+    for failure in discovery_errors:
+        key = os.path.normcase(os.path.abspath(failure.path))
+        if key in seen_errors:
+            continue
+        seen_errors.add(key)
+        try:
+            rel = failure.path.relative_to(failure.skill_root)
+            skill_name = rel.parts[0] if len(rel.parts) > 1 else rel.name
+        except ValueError:
+            skill_name = failure.path.name or str(failure.path)
+        result = SkillScanResult(
+            skill_name=skill_name,
+            findings=[],
+            risk_score=0.0,
+            risk_level="ERROR",
+            error=f"cannot read {failure.path}: {failure.message}",
+            agent=failure.location.agent,
+            file_path=str(failure.path),
+        )
+        skill_key = (failure.location_index, str(failure.skill_root), skill_name)
+        entries.append(
+            InstalledSkillEntry(
+                location_index=failure.location_index,
+                skill_key=skill_key,
+                skill_name=skill_name,
                 result=result,
             )
         )
