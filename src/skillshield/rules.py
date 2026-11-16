@@ -1654,6 +1654,74 @@ RULE_COMPILED_PYTHON = Rule(
 )
 
 
+# ── SG-104: Suspicious Tool Name ───────────────────────────────
+
+# A tool name is split into words, at "_", "-", "." and camelCase boundaries, and a
+# word must match exactly. So "stealth_mode_toggle" and "dump_truck_lookup" are not
+# flagged, while "harvest_credentials" and "steal_cookies" are. Ported from mcpscan MR-005.
+_HARMFUL_TOOL_WORDS = frozenset("""
+    exfil exfiltrate exfiltrates exfiltrated exfiltration exfiltrating
+    harvest harvests harvested harvesting harvester
+    steal steals stole stolen stealing stealer
+    leak leaks leaked leaking
+    bypass bypasses bypassed bypassing
+    intercept intercepts intercepted intercepting interceptor
+    sniff sniffs sniffer sniffing
+    """.split())
+# "dump" is harmful only before a target such as "credentials" or "all".
+_DUMP_TARGETS = frozenset("""
+    all credentials credential creds secrets secret passwords password env keys tokens token
+    database db users cookies history memory
+    """.split())
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_NAME_SEPARATOR = re.compile(r"[^a-z0-9]+")
+
+
+def _tool_name_words(name: str) -> list[str]:
+    return [w for w in _NAME_SEPARATOR.split(_CAMEL_BOUNDARY.sub(" ", name).lower()) if w]
+
+
+def _has_harmful_word(words: list[str]) -> bool:
+    for i, word in enumerate(words):
+        if word in _HARMFUL_TOOL_WORDS:
+            return True
+        following = words[i + 1] if i + 1 < len(words) else ""
+        if word == "dump" and following in _DUMP_TARGETS:
+            return True
+        if word == "upload" and following == "all":
+            return True
+    return False
+
+
+def _check_suspicious_tool_name(listing: ToolListing) -> list[tuple[McpTool, str]]:
+    return [
+        (tool, tool.name)
+        for tool in listing.tools
+        if _has_harmful_word(_tool_name_words(tool.name))
+    ]
+
+
+RULE_SUSPICIOUS_TOOL_NAME = Rule(
+    id="SG-104",
+    name="Suspicious Tool Name",
+    severity=Severity.HIGH,
+    description=(
+        "An MCP tool's name suggests harmful behaviour the description does not disclose, "
+        "such as harvesting credentials, exfiltrating data, stealing, leaking, bypassing "
+        "controls, intercepting or sniffing traffic, dumping secrets or uploading everything. "
+        "An agent may call such a tool without the user knowing what it does. "
+        "Ported from mcpscan rule MR-005."
+    ),
+    remediation=(
+        "Rename the tool so its name says what it does, and state its effect in the description. "
+        "If the tool really does one of these things, remove it or document why the agent needs it "
+        "and what the user is told."
+    ),
+    listing_fn=_check_suspicious_tool_name,
+    tags=["mcp", "tool-name", "owasp-asi02", "owasp-ast01"],
+)
+
+
 # ── All rules ──────────────────────────────────────────────────
 
 ALL_RULES: list[Rule] = [
@@ -1672,4 +1740,5 @@ ALL_RULES: list[Rule] = [
     RULE_PACKAGE_REGISTRY,
     RULE_BRAND_NAME_IMPERSONATION,
     RULE_COMPILED_PYTHON,
+    RULE_SUSPICIOUS_TOOL_NAME,
 ]
