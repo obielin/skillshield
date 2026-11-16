@@ -1120,6 +1120,19 @@ class TestVariationSelectorSmuggling:
         # Do not cut an escape in half when the remaining display budget is too small.
         assert _decode_variation_selectors("︀", 3) == ""
 
+    def test_a_truncated_escape_stops_decoding_later_runs(self):
+        def variation_selectors(data: bytes) -> str:
+            return "".join(
+                chr(0xE0100 + byte - 16) if byte >= 16 else chr(0xFE00 + byte) for byte in data
+            )
+
+        hidden = variation_selectors(b"A" * 79 + b"\x00") + " " + variation_selectors(b"XYZ")
+        snippets = RULE_OBFUSCATION.match(hidden)
+
+        assert len(snippets) == 1
+        assert 'decoding to "' + "A" * 79 + '"' in snippets[0]
+        assert "XYZ" not in snippets[0]
+
     def test_control_bytes_in_a_hidden_run_are_escaped_before_display(self):
         # ESC and CR must not reach the terminal through the finding snippet.
         hidden = "".join(
