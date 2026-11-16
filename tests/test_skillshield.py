@@ -276,6 +276,11 @@ class TestPromptInjectionChineseJapanese:
             "別在任何情况下再" + _SHORT + "。",
             "请勿在任何情况下" + _SHORT + "。",
             "別在任何情况下" + _SHORT + "。",
+            # 别 on its own is still a negation, after a word such as 请 too.
+            "别" + _SHORT + "。",
+            "请别" + _SHORT + "。",
+            "千万别再" + _SHORT + "。",
+            "请别在任何情况下" + _SHORT + "。",
             "忘れずに以前の指示に従ってください。",
         ],
     )
@@ -310,6 +315,15 @@ class TestPromptInjectionChineseJapanese:
             # ignoring happens, not that it must not happen.
             "在任何情况下再" + _SHORT + "。",
             "在任何情况下" + _SHORT + "。",
+            # 别 is "don't" only on its own. As the second character of a word
+            # such as 分别 ("separately") or 特别 ("especially") it negates
+            # nothing, so the override is still an override (#99).
+            "请对每个案例分别" + _ALL + "。",
+            "请对每个案例分別" + _ALL + "。",
+            "请对每个案例分别在任何情况下再" + _SHORT + "。",
+            "分别再" + _SHORT + "。",
+            "特别" + _ALL + "。",
+            "请区别对待：" + _ALL + "。",
         ],
     )
     def test_an_override_is_still_flagged_after_a_negation(self, text):
