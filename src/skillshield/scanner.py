@@ -78,11 +78,16 @@ def _is_agent_rule_file(path: Path) -> bool:
 LISTING_EXTENSIONS = {".json", ".jsonl"}
 
 
+def decode_text(data: bytes, encoding: str = "utf-8") -> str:
+    """Decode the bytes of a skill the same way for a file and for stdin."""
+    text = data.decode(encoding, errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _read_text(path: Path, encoding: str = "utf-8") -> str:
     with path.open("rb") as source:
         data = source.read()
-    text = data.decode(encoding, errors="replace")
-    return text.replace("\r\n", "\n").replace("\r", "\n")
+    return decode_text(data, encoding)
 
 
 # How much of a .jsonl file is read to decide whether it is a tool listing.

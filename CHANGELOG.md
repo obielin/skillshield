@@ -24,6 +24,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- `skillshield scan -` now reads stdin as UTF-8, the same way a file is read. On Windows, stdin was decoded with the locale's legacy code page, so a skill piped in with Chinese or Japanese text scanned as SAFE where the same file was CRITICAL, or the scan stopped with `UnicodeDecodeError`.
 - SG-003 distinguishes routine support escalation and admin-access wording from explicit requests for elevated system privileges or execution as an elevated user (#8).
 - Pattern findings report the starting lines of multiline and repeated matches in text, JSON and SARIF output without repeatedly scanning earlier lines (#9).
 - A directory scan exits 1 when any file is CRITICAL or HIGH (matching a single-file scan), and exits 2 when any file cannot be read. Before, a folder whose only problem was HIGH exited 0 (#83).
