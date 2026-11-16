@@ -393,7 +393,7 @@ They are planned, and each one is added to this table as it lands:
 | SG-102 | #136 | Over-broad tool permissions | planned |
 | SG-103 | #137 | Unrestricted path parameter | planned |
 | SG-104 | #138 | Suspicious tool name | planned |
-| SG-105 | #139 | Tool with no description or input schema | planned |
+| SG-105 | #139 | Tool with no description or input schema | added |
 | SG-106 | #140 | Excessive tool count | planned |
 
 Every rule is tagged with the OWASP risks it relates to; see [SkillShield and agentic security](#skillshield-and-agentic-security).
@@ -430,6 +430,7 @@ Each rule carries tags such as `owasp-asi01` and `owasp-ast01`. They appear in `
 | SG-013 | Untrusted Package Registry | ASI04 Agentic Supply Chain Vulnerabilities | AST02 Supply Chain Compromise |
 | SG-014 | Compiled Python Payload | ASI04 Agentic Supply Chain Vulnerabilities | AST01 Malicious Skills; AST08 Poor Scanning |
 | SG-015 | Well-known Skill Name Impersonation | ASI04 Agentic Supply Chain Vulnerabilities | AST04 Insecure Metadata |
+| SG-105 | Tool with No Description or Input Schema | ASI02 Tool Misuse and Exploitation | AST04 Insecure Metadata |
 
 AST08 (Poor Scanning) is the risk that a scanner misses what is hidden in a skill. SG-008, SG-009 and SG-014 flag the hiding techniques themselves: encoded text, invisible channels and compiled code that cannot be read.
 
