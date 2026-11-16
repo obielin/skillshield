@@ -379,8 +379,9 @@ and never calls a tool: the scan works offline and sends nothing.
 | SG-014 | HIGH | Compiled Python Payload | A `.pyc` or `.pyo` file in a skill folder. Bytecode cannot be reviewed, and Python imports or runs it directly, so a payload can hide behind a harmless-looking skill that claims to call a `.py` script. If the matching `.py` source is missing, the finding names that source file (its file name, not its full path) and asks you to ship the source instead. |
 | SG-015 | MEDIUM | Well-known Skill Name Impersonation | Frontmatter names that closely resemble canonical skill names or add suspicious suffixes such as `1` or `-pro`. |
 | SG-104 | HIGH | Suspicious Tool Name | An MCP tool in a saved listing whose name suggests harmful behaviour, such as `harvest_credentials`, `exfiltrate_data`, `steal_cookies`, `leak_secrets`, `bypass_auth`, `intercept_requests`, `sniff_traffic`, `dump_credentials` or `upload_all_files`. Words are matched whole, so `stealth_mode_toggle` and `dump_truck_lookup` are not flagged. |
+| SG-105 | MEDIUM | Tool with No Description or Input Schema | An MCP tool in a saved listing with no description, or no `inputSchema`. Without a description the agent cannot tell when the tool is safe to call; without a schema nothing checks the arguments it is sent. A tool that takes no input still needs `{"type": "object", "properties": {}}`, which is not flagged. |
 
-That is 5 CRITICAL rules, 9 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
+That is 5 CRITICAL rules, 9 HIGH rules and 3 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
 
 In a saved MCP listing, the rules above read the file as it is saved, so a plain instruction
 in a tool's description is caught by SG-001 in the same way as in a skill. Text hidden behind
@@ -393,7 +394,6 @@ They are planned, and each one is added to this table as it lands:
 | SG-101 | #135 | Unsafe server authentication | planned |
 | SG-102 | #136 | Over-broad tool permissions | planned |
 | SG-103 | #137 | Unrestricted path parameter | planned |
-| SG-105 | #139 | Tool with no description or input schema | planned |
 | SG-106 | #140 | Excessive tool count | planned |
 
 Every rule is tagged with the OWASP risks it relates to; see [SkillShield and agentic security](#skillshield-and-agentic-security).
@@ -431,6 +431,7 @@ Each rule carries tags such as `owasp-asi01` and `owasp-ast01`. They appear in `
 | SG-014 | Compiled Python Payload | ASI04 Agentic Supply Chain Vulnerabilities | AST01 Malicious Skills; AST08 Poor Scanning |
 | SG-015 | Well-known Skill Name Impersonation | ASI04 Agentic Supply Chain Vulnerabilities | AST04 Insecure Metadata |
 | SG-104 | Suspicious Tool Name | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
+| SG-105 | Tool with No Description or Input Schema | ASI02 Tool Misuse and Exploitation | AST04 Insecure Metadata |
 
 AST08 (Poor Scanning) is the risk that a scanner misses what is hidden in a skill. SG-008, SG-009 and SG-014 flag the hiding techniques themselves: encoded text, invisible channels and compiled code that cannot be read.
 
