@@ -61,6 +61,15 @@ def test_issue_example_is_flagged_with_its_name_and_line(tmp_path):
     assert finding.line_numbers == [1]
 
 
+def test_control_characters_in_tool_name_are_escaped_in_snippet(tmp_path):
+    decoded_name = "harvest_credentials\x1b[2J"
+
+    findings = _scan(tmp_path, _listing_with(decoded_name))
+
+    assert len(findings) == 1
+    assert findings[0].snippets == [r"harvest_credentials\x1b[2J"]
+
+
 @pytest.mark.parametrize("name", TRUE_POSITIVE_NAMES)
 def test_harmful_tool_names_are_flagged(tmp_path, name):
     findings = _scan(tmp_path, _listing_with("read_file", name))

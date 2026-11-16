@@ -1695,7 +1695,7 @@ def _has_harmful_word(words: list[str]) -> bool:
 
 def _check_suspicious_tool_name(listing: ToolListing) -> list[tuple[McpTool, str]]:
     return [
-        (tool, tool.name)
+        (tool, _escape_control_characters(tool.name))
         for tool in listing.tools
         if _has_harmful_word(_tool_name_words(tool.name))
     ]
