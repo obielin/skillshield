@@ -18,6 +18,19 @@ import sys
 from pathlib import Path
 
 from skillshield import __version__
+from skillshield.scanner import decode_text
+
+
+def _read_stdin() -> str:
+    """Read stdin as UTF-8 bytes, the way a file is read.
+
+    sys.stdin decodes with the locale encoding. On Windows that is a legacy code page, so
+    UTF-8 text piped in was garbled before the rules saw it, or raised UnicodeDecodeError.
+    """
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:  # a text stream with no bytes under it, such as io.StringIO
+        return sys.stdin.read()
+    return decode_text(buffer.read())
 
 
 def _color(text: str, level: str) -> str:
@@ -230,8 +243,7 @@ def cmd_scan(args) -> int:
 
     # stdin
     if target == "-":
-        text = sys.stdin.read()
-        result = scanner.scan_text(text, name="<stdin>")
+        result = scanner.scan_text(_read_stdin(), name="<stdin>")
         results = [result]
 
     # directory

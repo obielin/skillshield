@@ -343,7 +343,10 @@ def test_listing_rule_runs_alongside_text_rules(tmp_path):
 
 def test_text_rules_do_not_receive_the_listing():
     assert LISTING_RULE.match(MANIFEST) == []
-    assert all(rule.listing_fn is None for rule in ALL_RULES if rule.id != "SG-105")
+    assert [rule.id for rule in ALL_RULES if rule.listing_fn is not None] == [
+        "SG-104",
+        "SG-105",
+    ]
 
 
 def test_a_failing_listing_rule_does_not_fail_the_scan(tmp_path):
