@@ -35,6 +35,8 @@ from skillshield.scanner import (
     SKILL_EXTENSIONS,
     SkillScanner,
     _dir_is_skipped,
+    _is_agent_rule_file,
+    _is_tool_listing_file,
 )
 
 LEVELS = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
@@ -96,7 +98,7 @@ def _is_scanned(path: Path, root: Path) -> bool:
         current = current / part
         if _dir_is_skipped(current):
             return False
-    return suffix in SKILL_EXTENSIONS
+    return suffix in SKILL_EXTENSIONS or _is_agent_rule_file(path) or _is_tool_listing_file(path)
 
 
 def _scan_paths(

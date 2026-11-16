@@ -9,13 +9,14 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from skillshield.mcp import ListingError, ToolListing, parse_listing
 from skillshield.models import BatchScanReport, Finding, SkillScanResult
 from skillshield.rules import (
     ALL_RULES,
     RULE_COMPILED_PYTHON,
     Rule,
     Severity,
-    hidden_tag_match_lines,
+    hidden_tag_match_details,
     hidden_tag_text_with_lines,
 )
 
@@ -39,6 +40,7 @@ _LEVEL_RANK = {"SAFE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
 # Skill file extensions supported
 SKILL_EXTENSIONS = {
+    ".mdc",
     ".md",
     ".txt",
     ".yaml",
@@ -53,6 +55,67 @@ SKILL_EXTENSIONS = {
     ".xml",
     ".html",
 }
+
+# Extensionless instruction files read by coding agents.
+_AGENT_RULE_FILENAMES = {".cursorrules", ".windsurfrules", ".clinerules", ".roorules", ".rules"}
+
+
+def _is_agent_rule_file(path: Path) -> bool:
+    if path.name in _AGENT_RULE_FILENAMES or path.name.startswith(".roorules-"):
+        return True
+    return any(
+        parent.name == ".clinerules"
+        or (
+            parent.parent.name == ".roo"
+            and (parent.name == "rules" or parent.name.startswith("rules-"))
+        )
+        for parent in path.parents
+    )
+
+
+# Files that can hold an MCP tool listing. A .json file is always scanned; a .jsonl
+# file only when it is a listing, since most .jsonl files are data.
+LISTING_EXTENSIONS = {".json", ".jsonl"}
+
+
+def decode_text(data: bytes, encoding: str = "utf-8") -> str:
+    """Decode the bytes of a skill the same way for a file and for stdin."""
+    text = data.decode(encoding, errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _read_text(path: Path, encoding: str = "utf-8") -> str:
+    with path.open("rb") as source:
+        data = source.read()
+    return decode_text(data, encoding)
+
+
+# How much of a .jsonl file is read to decide whether it is a tool listing.
+_LISTING_PREFIX_BYTES = 64 * 1024
+
+
+def _is_tool_listing_file(path: Path) -> bool:
+    """Whether a .jsonl file is an MCP tool listing, readable or not.
+
+    Only the first 64 KB is read, so a large data file is skipped without being
+    read in full; scan_file reads a listing in full. A line cut off at the limit
+    is left out.
+    """
+    if path.suffix.lower() != ".jsonl":
+        return False
+    try:
+        with path.open("rb") as source:
+            data = source.read(_LISTING_PREFIX_BYTES + 1)
+    except OSError:
+        return False
+    if len(data) > _LISTING_PREFIX_BYTES:
+        data = data[: data.rfind(b"\n", 0, _LISTING_PREFIX_BYTES) + 1]
+    text = data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    try:
+        return parse_listing(text, path.suffix) is not None
+    except ListingError:
+        return True
+
 
 # Compiled Python that Python runs directly but a text scanner cannot read.
 COMPILED_PYTHON_EXTENSIONS = {".pyc", ".pyo"}
@@ -242,13 +305,16 @@ class SkillScanner:
         self.verbose = verbose
         self._severity_order = list(Severity)
 
-    def scan_text(self, text: str, name: str = "skill") -> SkillScanResult:
+    def scan_text(
+        self, text: str, name: str = "skill", listing: ToolListing | None = None
+    ) -> SkillScanResult:
         """
         Scan a skill provided as plain text.
 
         Args:
-            text: The skill content (SKILL.md, YAML, Python, etc.)
-            name: Identifier for this skill in the report
+            text:    The skill content (SKILL.md, YAML, Python, etc.)
+            name:    Identifier for this skill in the report
+            listing: The text parsed as an MCP tool listing, for rules that read one
 
         Returns:
             SkillScanResult with all findings and risk score
@@ -272,27 +338,38 @@ class SkillScanner:
                 found_hidden = rule.match(hidden) if hidden else []
             except Exception:
                 found_hidden = []
-            if not snippets and not found_hidden:
+            try:
+                hits = rule.match_listing(listing) if listing is not None else []
+            except Exception:
+                hits = []
+            if not snippets and not found_hidden and not hits:
                 continue
             # Pattern hits can span lines or repeat, so a pattern rule reports the line of each
-            # match offset. check_fn rules return plain strings, so their snippets are located.
-            if not snippets:
+            # match offset. Other check_fn rules return plain strings, so their snippets are located.
+            if rule.id == "SG-008":
+                # These snippets are generated from invisible text and can share a visible prefix
+                # with unrelated source lines. Use their captured source locations instead.
+                unicode_matches = hidden_tag_match_details(text)
+                generated = {snippet for _, snippet in unicode_matches}
+                searchable = [snippet for snippet in snippets if snippet not in generated]
+                line_numbers = set(_find_all_line_numbers(text, searchable))
+                line_numbers.update(lineno for lineno, _ in unicode_matches)
+            elif not snippets:
                 line_numbers = set()
             elif rule.pattern is not None:
                 line_numbers = set(_pattern_line_numbers(text, rule.pattern))
             else:
                 line_numbers = set(_find_all_line_numbers(text, snippets))
-            if rule.id == "SG-008":
-                # The tag matches are generated snippets, so they are not in the text to be
-                # searched for; their lines come from the text.
-                line_numbers.update(hidden_tag_match_lines(text))
             # A match in the hidden text reports the lines whose characters it is made of.
             for match in found_hidden:
                 start = hidden.find(match)
                 owners = hidden_owners[start : start + len(match)] if start >= 0 else []
                 line_numbers.update(owners or hidden_owners)
+            # A listing finding reports the line where its tool starts.
+            line_numbers.update(tool.line for tool, _ in hits)
             line_numbers = sorted(n for n in line_numbers if n >= 1)
             snippets = snippets + [f"[hidden in Unicode tag characters] {s}" for s in found_hidden]
+            snippets += [snippet for _, snippet in hits]
             findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
 
         score = _compute_risk_score(findings)
@@ -324,7 +401,7 @@ class SkillScanner:
             return self._scan_compiled_file(p)
         self._log(f"  Scanning {p.name}...")
         try:
-            text = p.read_text(encoding=encoding, errors="replace")
+            text = _read_text(p, encoding)
         except Exception as e:
             return SkillScanResult(
                 skill_name=p.name,
@@ -333,7 +410,20 @@ class SkillScanner:
                 risk_level="ERROR",
                 error=str(e),
             )
-        return self.scan_text(text, name=p.name)
+        listing = None
+        broken = ""
+        if p.suffix.lower() in LISTING_EXTENSIONS:
+            try:
+                listing = parse_listing(text, p.suffix)
+            except ListingError as e:
+                broken = f"malformed MCP tool listing: {e}"
+        result = self.scan_text(text, name=p.name, listing=listing)
+        if broken:
+            # The text rules still ran, so their findings stay with the file, but a listing
+            # that cannot be read is never reported as SAFE.
+            result.risk_level = "ERROR"
+            result.error = broken
+        return result
 
     def _scan_compiled_file(self, path: Path, base: Path | None = None) -> SkillScanResult:
         """Report a compiled Python file as a HIGH finding.
@@ -400,8 +490,13 @@ class SkillScanner:
         base = Path(directory)
         glob = base.rglob("*") if recursive else base.glob("*")
         all_files = [p for p in sorted(glob) if p.is_file()]
-        paths = [p for p in all_files if p.suffix.lower() in exts]
-        # A compiled file asked for through extensions already reaches
+        paths = [
+            p
+            for p in all_files
+            if p.suffix.lower() in exts or _is_agent_rule_file(p) or _is_tool_listing_file(p)
+        ]
+        selected_paths = set(paths)
+        # A compiled file selected above already reaches
         # scan_file, which dispatches to the compiled check; collecting it
         # here as well would report the same file twice. Compiled Python is
         # never filtered by directory name: a submitted skill can hide
@@ -409,7 +504,7 @@ class SkillScanner:
         compiled = [
             p
             for p in all_files
-            if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS and p.suffix.lower() not in exts
+            if p.suffix.lower() in COMPILED_PYTHON_EXTENSIONS and p not in selected_paths
         ]
 
         selected = set(paths) | set(compiled)

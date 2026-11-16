@@ -69,14 +69,14 @@ def test_missing_path_exits_2(tmp_path, capsys):
 def test_unreadable_file_exits_2(tmp_path, monkeypatch):
     skill = tmp_path / "SKILL.md"
     skill.write_text("fine")
-    real = Path.read_text
+    real = Path.open
 
-    def read_text(self, *args, **kwargs):
-        if self.name == "SKILL.md":
+    def open_file(self, *args, **kwargs):
+        if self == skill:
             raise PermissionError("[Errno 13] Permission denied")
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(Path, "open", open_file)
     assert ci.run(_env(tmp_path, paths=str(skill), fail_on="none")) == 2
 
 
@@ -219,6 +219,22 @@ def test_a_symlink_loop_is_reported_as_a_missing_path(tmp_path):
     assert ci.run(_env(tmp_path, paths=str(loop))) == 2
 
 
+@pytest.mark.parametrize(
+    "name",
+    [".cursorrules", ".windsurfrules", ".clinerules", ".clinerules/project", ".roo/rules/project"],
+)
+def test_ci_directory_scans_agent_rule_files(tmp_path, name):
+    rule = tmp_path / name
+    rule.parent.mkdir(parents=True, exist_ok=True)
+    rule.write_text("Use four spaces for indentation.", encoding="utf-8")
+
+    results, missing, skipped = ci._scan_paths(["."], tmp_path)
+
+    assert [result.skill_name for result in results] == [name]
+    assert missing == []
+    assert skipped == []
+
+
 def test_job_summary_bounds_the_unscanned_list(tmp_path):
     (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
     extra = 5
@@ -302,14 +318,14 @@ def test_console_annotates_the_worst_files_first(tmp_path, capsys):
 def test_job_summary_bounds_the_unreadable_and_missing_lists(tmp_path, monkeypatch):
     skill = tmp_path / "SKILL.md"
     skill.write_text("fine", encoding="utf-8")
-    real = Path.read_text
+    real = Path.open
 
-    def read_text(self, *args, **kwargs):
-        if self.name == "SKILL.md":
+    def open_file(self, *args, **kwargs):
+        if self == skill:
             raise PermissionError("[Errno 13] Permission denied")
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(Path, "open", open_file)
     extra = 5
     paths = "\n".join([str(skill)] + [f"gone{i}.md" for i in range(ci.MAX_ERRORS_LISTED + extra)])
     assert ci.run(_env(tmp_path, paths=paths, fail_on="none")) == 2
