@@ -91,7 +91,7 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
 
     sarif_results: list[dict[str, Any]] = []
     for scan_result in results:
-        uri = _artifact_uri(scan_result.skill_name)
+        uri = _artifact_uri(scan_result.file_path or scan_result.skill_name)
         for finding in scan_result.findings:
             level = _SEVERITY_TO_LEVEL.get(finding.severity, "warning")
             message_text = (
@@ -108,13 +108,13 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
             # available so the result always has a valid physicalLocation.
             line_numbers = finding.line_numbers[:5] if finding.line_numbers else [1]
             for lineno in line_numbers:
+                artifact_location: dict[str, Any] = {"uri": uri}
+                if not scan_result.file_path:
+                    artifact_location["uriBaseId"] = "%SRCROOT%"
                 locations.append(
                     {
                         "physicalLocation": {
-                            "artifactLocation": {
-                                "uri": uri,
-                                "uriBaseId": "%SRCROOT%",
-                            },
+                            "artifactLocation": artifact_location,
                             "region": {"startLine": lineno},
                         }
                     }
@@ -128,6 +128,12 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
             }
             if finding.rule_id in rule_id_to_index:
                 entry["ruleIndex"] = rule_id_to_index[finding.rule_id]
+            if scan_result.agent:
+                entry["properties"] = {
+                    "agent": scan_result.agent,
+                    "skill": scan_result.skill_name,
+                    "path": scan_result.file_path or scan_result.skill_name,
+                }
 
             sarif_results.append(entry)
 
@@ -159,9 +165,10 @@ def report_to_sarif(report: BatchScanReport) -> dict[str, Any]:
     a skipped file cannot disappear from a machine-readable report.
     """
     log = results_to_sarif(report.results)
-    log["runs"][0].setdefault("properties", {})["unscanned"] = (
-        report.metadata.get("unscanned") or []
-    )
+    properties = log["runs"][0].setdefault("properties", {})
+    properties["unscanned"] = report.metadata.get("unscanned") or []
+    if "locations" in report.metadata:
+        properties["locations"] = report.metadata["locations"]
     return log
 
 

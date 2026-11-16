@@ -46,6 +46,8 @@ class SkillScanResult:
         line_count:    Total lines in the skill
         char_count:    Total characters in the skill
         error:         Any error encountered during scanning
+        agent:         Agent name when scanning installed skills
+        file_path:     Resolved file path when scanning installed skills
     """
 
     skill_name: str
@@ -56,6 +58,8 @@ class SkillScanResult:
     line_count: int = 0
     char_count: int = 0
     error: str = ""
+    agent: str = ""
+    file_path: str = ""
 
     @property
     def is_safe(self) -> bool:
