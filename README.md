@@ -79,6 +79,7 @@ The `skillguard` package on PyPI, and `skill-guard`, are other people's projects
 ```bash
 skillshield scan SKILL.md                  # scan one file
 skillshield scan ./skills/                 # scan a directory
+skillshield scan --installed               # scan skills already installed for local agents
 skillshield scan - < SKILL.md              # scan stdin
 skillshield check "some text to scan"      # scan text given on the command line
 skillshield rules                          # list the 15 rules
@@ -89,6 +90,7 @@ Options for `skillshield scan`:
 
 | Option | Values | Default | What it does |
 |---|---|---|---|
+| `--installed` | | off | Discover and scan skill folders already installed for common coding agents instead of passing a target path. |
 | `--format` | `text`, `json`, `sarif` | `text` | Output format. |
 | `--min-severity` | `critical`, `high`, `medium`, `low`, `info` | `info` | Only report findings at this severity or above. |
 | `--verbose`, `-v` | | off | Show matched snippets in text output. It also prints `Scanning ...` progress lines to stderr, so JSON and SARIF output on stdout stay valid. |
@@ -213,9 +215,22 @@ This text has prompt injection and a URL but no file system access, so SG-011 do
 |---|---|---|---|
 | `skillshield scan` on one file or stdin | the risk level is CRITICAL or HIGH | the path does not exist, or the file cannot be read | 0 |
 | `skillshield scan` on a directory | at least one file is CRITICAL or HIGH | the path does not exist, or any file cannot be read | 0 |
+| `skillshield scan --installed` | at least one file is CRITICAL or HIGH | any file or folder cannot be read (missing locations are skipped) | 0 |
 | `skillshield check` | there is at least one finding | | 0 |
 
-A directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate.
+A directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate (unreadable subfolders are not reported by plain directory scans, while `--installed` reports both unreadable files and unreadable folders).
+
+### Check the skills already installed on your computer
+
+To audit skills that coding agents on your machine already load, run:
+
+```bash
+skillshield scan --installed
+skillshield scan --installed --format json
+skillshield scan --installed --format sarif
+```
+
+SkillShield checks the standard skill locations for **Claude Code** (`~/.claude/skills/`, `.claude/skills/`, and `skills/` inside installed plugins under `~/.claude/plugins/`), **Codex** (`~/.agents/skills/`, `.agents/skills/` up to the repository root, `/etc/codex/skills/`, and `~/.codex/skills/`), **OpenCode** (`~/.config/opencode/skills/` and `.opencode/skills/`), and **OpenClaw** (`~/.openclaw/skills/` and `skills/`). Missing folders are skipped quietly, but a folder that exists and cannot be read is reported as `ERROR` so an incomplete scan can never look clean. Symlinked skill folders are followed with cycle protection, while directory symlinks inside a skill that point outside its own folder are skipped and listed (and each skill is capped at 1,000 files); files reachable from more than one location are deduplicated by resolved path. The scan runs fully offline with the same exit codes as a folder scan (`0` clean, `1` CRITICAL or HIGH, `2` unreadable file or folder, or invalid arguments).
 
 ### Python
 

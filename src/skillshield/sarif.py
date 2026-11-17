@@ -10,6 +10,7 @@ Reference: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from skillshield import __version__
@@ -58,9 +59,17 @@ def _artifact_uri(skill_name: str) -> str:
     """
     Normalise a skill_name to a URI suitable for SARIF artifactLocation.
 
-    Backslashes are converted to forward slashes; absolute paths are kept
-    as-is so that GitHub's path-matching still works.
+    Absolute paths (installed skills) become percent-encoded ``file:`` URIs so
+    spaces, ``#``, and other reserved characters keep their meaning. Relative
+    skill names keep the plain forward-slash form that GitHub path-matching
+    expects.
     """
+    path = Path(skill_name)
+    try:
+        if path.is_absolute():
+            return path.as_uri()
+    except (OSError, ValueError):
+        pass
     return skill_name.replace("\\", "/")
 
 
@@ -90,8 +99,34 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
     rule_id_to_index = {rid: i for i, rid in enumerate(all_rule_ids)}
 
     sarif_results: list[dict[str, Any]] = []
+    notifications: list[dict[str, Any]] = []
     for scan_result in results:
-        uri = _artifact_uri(scan_result.skill_name)
+        uri = _artifact_uri(scan_result.file_path or scan_result.skill_name)
+        if scan_result.risk_level == "ERROR" or scan_result.error:
+            artifact_location: dict[str, Any] = {"uri": uri}
+            if not scan_result.file_path:
+                artifact_location["uriBaseId"] = "%SRCROOT%"
+            notification: dict[str, Any] = {
+                "level": "error",
+                "message": {
+                    "text": scan_result.error
+                    or f"Failed to scan {scan_result.file_path or scan_result.skill_name}"
+                },
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": artifact_location,
+                        }
+                    }
+                ],
+            }
+            if scan_result.agent:
+                notification["properties"] = {
+                    "agent": scan_result.agent,
+                    "skill": scan_result.skill_name,
+                    "path": scan_result.file_path or scan_result.skill_name,
+                }
+            notifications.append(notification)
         for finding in scan_result.findings:
             level = _SEVERITY_TO_LEVEL.get(finding.severity, "warning")
             message_text = (
@@ -108,13 +143,13 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
             # available so the result always has a valid physicalLocation.
             line_numbers = finding.line_numbers[:5] if finding.line_numbers else [1]
             for lineno in line_numbers:
+                artifact_location: dict[str, Any] = {"uri": uri}
+                if not scan_result.file_path:
+                    artifact_location["uriBaseId"] = "%SRCROOT%"
                 locations.append(
                     {
                         "physicalLocation": {
-                            "artifactLocation": {
-                                "uri": uri,
-                                "uriBaseId": "%SRCROOT%",
-                            },
+                            "artifactLocation": artifact_location,
                             "region": {"startLine": lineno},
                         }
                     }
@@ -128,6 +163,12 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
             }
             if finding.rule_id in rule_id_to_index:
                 entry["ruleIndex"] = rule_id_to_index[finding.rule_id]
+            if scan_result.agent:
+                entry["properties"] = {
+                    "agent": scan_result.agent,
+                    "skill": scan_result.skill_name,
+                    "path": scan_result.file_path or scan_result.skill_name,
+                }
 
             sarif_results.append(entry)
 
@@ -142,6 +183,13 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
         },
         "results": sarif_results,
     }
+    if notifications:
+        run["invocations"] = [
+            {
+                "executionSuccessful": False,
+                "toolExecutionNotifications": notifications,
+            }
+        ]
 
     return {
         "$schema": _SARIF_SCHEMA,
@@ -159,9 +207,12 @@ def report_to_sarif(report: BatchScanReport) -> dict[str, Any]:
     a skipped file cannot disappear from a machine-readable report.
     """
     log = results_to_sarif(report.results)
-    log["runs"][0].setdefault("properties", {})["unscanned"] = (
-        report.metadata.get("unscanned") or []
-    )
+    properties = log["runs"][0].setdefault("properties", {})
+    properties["unscanned"] = report.metadata.get("unscanned") or []
+    if "skipped" in report.metadata:
+        properties["skipped"] = report.metadata["skipped"]
+    if "locations" in report.metadata:
+        properties["locations"] = report.metadata["locations"]
     return log
 
 
