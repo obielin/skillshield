@@ -214,11 +214,11 @@ This text has prompt injection and a URL but no file system access, so SG-011 do
 | Command | Exit 1 when | Exit 2 when | Otherwise |
 |---|---|---|---|
 | `skillshield scan` on one file or stdin | the risk level is CRITICAL or HIGH | the path does not exist, or the file cannot be read | 0 |
-| `skillshield scan` on a directory | at least one file is CRITICAL or HIGH | the path does not exist, or any file or folder cannot be read | 0 |
+| `skillshield scan` on a directory | at least one file is CRITICAL or HIGH | the path does not exist, or any file cannot be read | 0 |
 | `skillshield scan --installed` | at least one file is CRITICAL or HIGH | any file or folder cannot be read (missing locations are skipped) | 0 |
 | `skillshield check` | there is at least one finding | | 0 |
 
-A directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files and folders exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate.
+A directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate (unreadable subfolders are not reported by plain directory scans, while `--installed` reports both unreadable files and unreadable folders).
 
 ### Check the skills already installed on your computer
 

@@ -226,14 +226,15 @@ def _stat_dir(path: Path) -> tuple[bool, str]:
     """Whether ``path`` is a directory, and why it could not be read if it is not.
 
     A path that does not exist is a missing location and stays quiet: it returns
-    ``(False, "")``. Any other failure (a permission error, say) returns the
-    message, because the scan cannot vouch for a directory it could not open.
+    ``(False, "")``. Any other failure (a permission error or invalid path, say)
+    returns the message, because the scan cannot vouch for a directory it could
+    not open.
     """
     try:
         st = os.stat(path)
     except (FileNotFoundError, NotADirectoryError):
         return False, ""
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return False, str(exc)
     return stat.S_ISDIR(st.st_mode), "" if stat.S_ISDIR(st.st_mode) else "not a directory"
 
@@ -273,30 +274,35 @@ def _find_skills_subdirs(
     skipped: list[str] = []
     capped = False
 
-    def _walk(directory: Path) -> None:
-        nonlocal capped
-        if capped:
-            return
+    stack: list[Path] = [root]
+    while stack and not capped:
+        directory = stack.pop()
         try:
             entries = sorted(os.scandir(directory), key=lambda e: e.name)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             errors.append((directory, str(exc)))
-            return
+            continue
+        subdirs_to_push: list[Path] = []
         for entry in entries:
-            if capped:
-                return
             try:
                 st = os.stat(entry.path)
             except (FileNotFoundError, NotADirectoryError):
                 # A broken or dangling link names no skills directory.
                 continue
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 errors.append((Path(entry.path), str(exc)))
                 continue
             if not stat.S_ISDIR(st.st_mode):
                 continue
             entry_path = Path(entry.path)
-            if entry.is_symlink():
+            try:
+                is_link = stat.S_ISLNK(os.lstat(entry_path).st_mode)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            except (OSError, ValueError) as exc:
+                errors.append((entry_path, str(exc)))
+                continue
+            if is_link:
                 resolved_dir = _resolve_path(entry_path)
                 if not resolved_dir.is_relative_to(root_boundary):
                     skipped.append(
@@ -311,15 +317,15 @@ def _find_skills_subdirs(
             if len(visited) >= max_dirs:
                 capped = True
                 skipped.append(f"{root} (stopped after {max_dirs} directories)")
-                return
+                break
             visited.add(key)
             if entry.name == "skills":
                 found.append(entry_path)
                 # Do not descend further: the skill scan walks this directory itself.
                 continue
-            _walk(entry_path)
+            subdirs_to_push.append(entry_path)
+        stack.extend(reversed(subdirs_to_push))
 
-    _walk(root)
     return found, errors, skipped
 
 
@@ -455,30 +461,35 @@ def _walk_files(
         dirs_seen = 1
         capped = False
 
-        def _descend(directory: Path, via_symlink: bool) -> None:
-            nonlocal files_seen, dirs_seen, capped
-            if capped:
-                return
+        stack: list[tuple[Path, bool]] = [(skill_root_dir, start_via_symlink)]
+        while stack and not capped:
+            directory, via_symlink = stack.pop()
             try:
                 entries = sorted(os.scandir(directory), key=lambda e: e.name)
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 errors.append((directory, str(exc)))
-                return
+                continue
+            subdirs_to_push: list[tuple[Path, bool]] = []
             for entry in entries:
-                if capped:
-                    return
                 entry_via_symlink = via_symlink or entry.is_symlink()
                 try:
                     st = os.stat(entry.path)
                 except (FileNotFoundError, NotADirectoryError):
                     # A broken or dangling link names no file to scan.
                     continue
-                except OSError as exc:
+                except (OSError, ValueError) as exc:
                     errors.append((Path(entry.path), str(exc)))
                     continue
                 entry_path = Path(entry.path)
                 if stat.S_ISDIR(st.st_mode):
-                    if entry.is_symlink():
+                    try:
+                        is_link = stat.S_ISLNK(os.lstat(entry_path).st_mode)
+                    except (FileNotFoundError, NotADirectoryError):
+                        continue
+                    except (OSError, ValueError) as exc:
+                        errors.append((entry_path, str(exc)))
+                        continue
+                    if is_link:
                         resolved_dir = _resolve_path(entry_path)
                         if not resolved_dir.is_relative_to(skill_boundary):
                             skipped.append(
@@ -492,18 +503,17 @@ def _walk_files(
                     if dirs_seen > max_dirs:
                         capped = True
                         skipped.append(f"{skill_root_dir} (stopped after {max_dirs} directories)")
-                        return
+                        break
                     visited_dirs.add(key)
-                    _descend(entry_path, entry_via_symlink)
+                    subdirs_to_push.append((entry_path, entry_via_symlink or is_link))
                 elif stat.S_ISREG(st.st_mode):
                     if files_seen >= file_limit:
                         capped = True
                         skipped.append(f"{skill_root_dir} (stopped after {file_limit} files)")
-                        return
+                        break
                     files_seen += 1
                     collected.append((entry_path, _resolve_path(entry_path), entry_via_symlink))
-
-        _descend(skill_root_dir, start_via_symlink)
+            stack.extend(reversed(subdirs_to_push))
 
     root_files_seen = 0
     root_files_capped = False

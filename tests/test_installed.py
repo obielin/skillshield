@@ -649,3 +649,55 @@ class TestSymlinksDedupeAndErrors:
             assert note["properties"]["path"] == str(locked)
         finally:
             locked.chmod(0o755)
+
+    def test_embedded_nul_in_plugin_inventory_is_controlled_error(
+        self, isolated_env, monkeypatch, capsys
+    ):
+        home, _ = isolated_env
+        plugins = home / ".claude" / "plugins"
+        plugins.mkdir(parents=True)
+        (plugins / "installed_plugins.json").write_bytes(
+            json.dumps(
+                {
+                    "version": 2,
+                    "plugins": {"bad@mkt": [{"installPath": "/tmp/bad\x00path"}]},
+                }
+            ).encode("utf-8")
+        )
+        codex_skill = _write_skill(
+            home / ".agents" / "skills",
+            "clean-codex",
+            CLEAN_SAMPLE.read_text(encoding="utf-8"),
+        ).resolve()
+
+        code = _run_cli(monkeypatch, "scan", "--installed", "--format", "json")
+        payload = json.loads(capsys.readouterr().out)
+
+        assert code == 2
+        assert payload["errors"] == 1
+        assert any(
+            item["path"] == str(codex_skill) and item["risk_level"] == "SAFE"
+            for item in payload["results"]
+        )
+        assert any(item["risk_level"] == "ERROR" for item in payload["results"])
+
+    def test_deeply_nested_directories_do_not_hit_recursion_limit(
+        self, isolated_env, monkeypatch, capsys
+    ):
+        home, _ = isolated_env
+        cur = home / ".claude" / "skills" / "deep-skill"
+        cur.mkdir(parents=True)
+        try:
+            for _ in range(1100):
+                cur = cur / "d"
+                cur.mkdir()
+        except OSError:
+            pytest.skip("host filesystem does not allow 1100-level paths")
+        (cur / "SKILL.md").write_text(CLEAN_SAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+
+        code = _run_cli(monkeypatch, "scan", "--installed", "--format", "json")
+        payload = json.loads(capsys.readouterr().out)
+
+        assert code == 0
+        assert payload["total"] == 1
+        assert payload["results"][0]["skill"] == "deep-skill"
