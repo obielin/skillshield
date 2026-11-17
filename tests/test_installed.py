@@ -530,3 +530,122 @@ class TestSymlinksDedupeAndErrors:
         assert all(uri.startswith("file://") for uri in uris)
         assert all("%20" in uri and "%23" in uri for uri in uris)
         assert all("#" not in uri for uri in uris)
+
+    def test_external_directory_symlink_inside_skill_is_skipped_and_listed(
+        self, isolated_env, tmp_path, monkeypatch, capsys
+    ):
+        home, _ = isolated_env
+        outside = tmp_path / "outside_huge_tree"
+        outside.mkdir()
+        (outside / "secret.md").write_text(
+            MALICIOUS_SAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+
+        # Direct skill with an internal symlink pointing outside its own folder.
+        claude_skill = home / ".claude" / "skills" / "local-skill"
+        claude_skill.mkdir(parents=True)
+        (claude_skill / "SKILL.md").write_text(
+            CLEAN_SAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+
+        # Symlinked skill folder (Codex style) that also has an external link inside it.
+        external_skill = tmp_path / "external_codex_skill"
+        external_skill.mkdir()
+        (external_skill / "SKILL.md").write_text(
+            CLEAN_SAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        codex_skills = home / ".agents" / "skills"
+        codex_skills.mkdir(parents=True)
+
+        try:
+            (claude_skill / "ext-link").symlink_to(outside, target_is_directory=True)
+            (external_skill / "ext-link").symlink_to(outside, target_is_directory=True)
+            (codex_skills / "linked-skill").symlink_to(external_skill, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not permitted in this environment")
+
+        code = _run_cli(monkeypatch, "scan", "--installed", "--format", "json")
+        payload = json.loads(capsys.readouterr().out)
+
+        assert code == 0
+        assert payload["total"] == 2
+        assert all("secret.md" not in item["path"] for item in payload["results"])
+        assert len(payload["skipped"]) == 2
+        assert any(str(claude_skill / "ext-link") in entry for entry in payload["skipped"])
+        assert any(
+            str(codex_skills / "linked-skill" / "ext-link") in entry for entry in payload["skipped"]
+        )
+
+        # Text and SARIF formats also list skipped links.
+        text_code = _run_cli(monkeypatch, "scan", "--installed", "--no-color")
+        text_out = capsys.readouterr().out
+        assert text_code == 0
+        assert "SKIPPED (2)" in text_out
+        assert "symlink outside skill folder" in text_out
+
+        sarif_code = _run_cli(monkeypatch, "scan", "--installed", "--format", "sarif")
+        sarif_out = json.loads(capsys.readouterr().out)
+        assert sarif_code == 0
+        assert len(sarif_out["runs"][0]["properties"]["skipped"]) == 2
+
+    def test_per_skill_file_cap_stops_oversized_skill_and_lists_skipped(
+        self, isolated_env, monkeypatch, capsys
+    ):
+        home, _ = isolated_env
+        big_skill = home / ".claude" / "skills" / "aaa-big-skill"
+        big_skill.mkdir(parents=True)
+        for i in range(6):
+            (big_skill / f"file_{i:02d}.md").write_text(
+                CLEAN_SAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+        other_skill = _write_skill(
+            home / ".claude" / "skills",
+            "zzz-other-skill",
+            CLEAN_SAMPLE.read_text(encoding="utf-8"),
+        ).resolve()
+
+        monkeypatch.setattr(installed, "MAX_FILES_PER_SKILL", 3)
+
+        code = _run_cli(monkeypatch, "scan", "--installed", "--format", "json")
+        payload = json.loads(capsys.readouterr().out)
+
+        assert code == 0
+        # 3 files from big-skill + 1 file from other-skill (cap is per-skill).
+        assert payload["total"] == 4
+        assert any(item["path"] == str(other_skill) for item in payload["results"])
+        assert any(
+            str(big_skill) in entry and "stopped after 3 files" in entry
+            for entry in payload["skipped"]
+        )
+
+    def test_unreadable_directory_reported_in_sarif_invocations(
+        self, isolated_env, monkeypatch, capsys
+    ):
+        if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):
+            pytest.skip("chmod 0o000 does not block reads for root or on Windows")
+        home, _ = isolated_env
+        locked = home / ".claude" / "skills" / "locked"
+        locked.mkdir(parents=True)
+        (locked / "SKILL.md").write_text("secret", encoding="utf-8")
+        locked.chmod(0o000)
+        try:
+            code = _run_cli(monkeypatch, "scan", "--installed", "--format", "sarif")
+            sarif = json.loads(capsys.readouterr().out)
+            assert code == 2
+            run = sarif["runs"][0]
+            invocations = run["invocations"]
+            assert len(invocations) == 1
+            assert invocations[0]["executionSuccessful"] is False
+            notifications = invocations[0]["toolExecutionNotifications"]
+            assert len(notifications) == 1
+            note = notifications[0]
+            assert note["level"] == "error"
+            assert str(locked) in note["message"]["text"]
+            assert (
+                note["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                == locked.as_uri()
+            )
+            assert note["properties"]["agent"] == "Claude Code"
+            assert note["properties"]["path"] == str(locked)
+        finally:
+            locked.chmod(0o755)

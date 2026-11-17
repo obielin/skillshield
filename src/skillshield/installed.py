@@ -22,6 +22,10 @@ from skillshield.scanner import (
 # Module-level so tests can override it without touching the host's /etc/codex/skills.
 _SYSTEM_CODEX_SKILLS = Path("/etc/codex/skills")
 
+# Bound per-skill traversal so a symlinked or oversized folder cannot stall a scan.
+MAX_FILES_PER_SKILL = 1_000
+_MAX_DISCOVERY_DIRS = 2_000
+
 _LEVEL_PRIORITY = {
     "ERROR": 5,
     "CRITICAL": 4,
@@ -234,34 +238,53 @@ def _stat_dir(path: Path) -> tuple[bool, str]:
     return stat.S_ISDIR(st.st_mode), "" if stat.S_ISDIR(st.st_mode) else "not a directory"
 
 
-def _find_skills_subdirs(root: Path) -> tuple[list[Path], list[tuple[Path, str]]]:
-    """Walk ``root`` following symlinks (cycle-safe) and return ``skills`` dirs.
+def _resolve_path(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError):
+        return Path(os.path.abspath(path))
 
-    Returns the directories found and the ``(path, message)`` pairs for any
-    directory that could not be read.
+
+def _find_skills_subdirs(
+    root: Path,
+    max_dirs: int = _MAX_DISCOVERY_DIRS,
+) -> tuple[list[Path], list[tuple[Path, str]], list[str]]:
+    """Walk ``root`` within its own tree (cycle-safe) and return ``skills`` dirs.
+
+    Returns the directories found, ``(path, message)`` pairs for any directory
+    that could not be read, and descriptions of skipped external symlinks or
+    capped traversals.
     """
     is_dir, problem = _stat_dir(root)
     if problem:
-        return [], [(root, problem)]
+        return [], [(root, problem)], []
     if not is_dir:
-        return [], []
+        return [], [], []
 
     try:
         root_stat = os.stat(root)
     except OSError as exc:
-        return [], [(root, str(exc))]
+        return [], [(root, str(exc))], []
 
+    root_boundary = _resolve_path(root)
     visited: set[tuple[int, int]] = {(root_stat.st_dev, root_stat.st_ino)}
     found: list[Path] = []
     errors: list[tuple[Path, str]] = []
+    skipped: list[str] = []
+    capped = False
 
     def _walk(directory: Path) -> None:
+        nonlocal capped
+        if capped:
+            return
         try:
             entries = sorted(os.scandir(directory), key=lambda e: e.name)
         except OSError as exc:
             errors.append((directory, str(exc)))
             return
         for entry in entries:
+            if capped:
+                return
             try:
                 st = os.stat(entry.path)
             except (FileNotFoundError, NotADirectoryError):
@@ -273,11 +296,22 @@ def _find_skills_subdirs(root: Path) -> tuple[list[Path], list[tuple[Path, str]]
             if not stat.S_ISDIR(st.st_mode):
                 continue
             entry_path = Path(entry.path)
+            if entry.is_symlink():
+                resolved_dir = _resolve_path(entry_path)
+                if not resolved_dir.is_relative_to(root_boundary):
+                    skipped.append(
+                        f"{entry_path} -> {resolved_dir} (symlink outside plugin folder)"
+                    )
+                    continue
             if _dir_is_skipped(entry_path):
                 continue
             key = (st.st_dev, st.st_ino)
             if key in visited:
                 continue
+            if len(visited) >= max_dirs:
+                capped = True
+                skipped.append(f"{root} (stopped after {max_dirs} directories)")
+                return
             visited.add(key)
             if entry.name == "skills":
                 found.append(entry_path)
@@ -286,7 +320,7 @@ def _find_skills_subdirs(root: Path) -> tuple[list[Path], list[tuple[Path, str]]
             _walk(entry_path)
 
     _walk(root)
-    return found, errors
+    return found, errors, skipped
 
 
 def _extract_install_paths(installed_json: Path) -> list[Path] | None:
@@ -312,21 +346,24 @@ def _extract_install_paths(installed_json: Path) -> list[Path] | None:
     return paths
 
 
-def _claude_plugin_skill_roots(plugins_dir: Path) -> tuple[list[Path], list[tuple[Path, str]]]:
+def _claude_plugin_skill_roots(
+    plugins_dir: Path,
+) -> tuple[list[Path], list[tuple[Path, str]], list[str]]:
     """Find ``skills`` folders inside installed Claude Code plugins.
 
-    Returns the roots and the ``(path, message)`` pairs for any directory that
-    could not be read.
+    Returns the roots, ``(path, message)`` pairs for any directory that could
+    not be read, and descriptions of any skipped external links or capped walks.
     """
     is_dir, problem = _stat_dir(plugins_dir)
     if problem:
-        return [], [(plugins_dir, problem)]
+        return [], [(plugins_dir, problem)], []
     if not is_dir:
-        return [], []
+        return [], [], []
 
     installed_json = plugins_dir / "installed_plugins.json"
     roots: list[Path] = []
     errors: list[tuple[Path, str]] = []
+    skipped: list[str] = []
     if installed_json.is_file():
         install_paths = _extract_install_paths(installed_json)
         if install_paths is not None:
@@ -335,15 +372,17 @@ def _claude_plugin_skill_roots(plugins_dir: Path) -> tuple[list[Path], list[tupl
                 if skills_dir.is_dir():
                     roots.append(skills_dir)
                 else:
-                    found, failed = _find_skills_subdirs(install_path)
+                    found, failed, skipped_dirs = _find_skills_subdirs(install_path)
                     roots.extend(found)
                     errors.extend(failed)
-            return _dedupe_dirs_by_inode(roots), errors
+                    skipped.extend(skipped_dirs)
+            return _dedupe_dirs_by_inode(roots), errors, skipped
 
-    found, failed = _find_skills_subdirs(plugins_dir)
+    found, failed, skipped_dirs = _find_skills_subdirs(plugins_dir)
     roots.extend(found)
     errors.extend(failed)
-    return _dedupe_dirs_by_inode(roots), errors
+    skipped.extend(skipped_dirs)
+    return _dedupe_dirs_by_inode(roots), errors, skipped
 
 
 def _dedupe_dirs_by_inode(dirs: list[Path]) -> list[Path]:
@@ -364,61 +403,135 @@ def _dedupe_dirs_by_inode(dirs: list[Path]) -> list[Path]:
     return unique
 
 
-def _walk_files(root: Path) -> tuple[list[tuple[Path, Path, bool]], list[tuple[Path, str]]]:
-    """Return files and unreadable directories under ``root``.
+def _walk_files(
+    root: Path,
+    max_files_per_skill: int | None = None,
+) -> tuple[list[tuple[Path, Path, bool]], list[tuple[Path, str]], list[str]]:
+    """Return files, unreadable directories, and skipped entries under ``root``.
 
-    Files are ``(entry_path, resolved_path, via_symlink)``. Symbolic links are
-    followed with cycle protection keyed by ``(st_dev, st_ino)``; a directory
-    that cannot be opened is returned as ``(path, message)`` instead of being
-    dropped, so the report can say the scan is incomplete.
+    Files are ``(entry_path, resolved_path, via_symlink)``. A skill folder at
+    the top level of ``root`` may itself be a symlink (as Codex uses), and
+    symlinks inside it are followed with cycle protection keyed by
+    ``(st_dev, st_ino)`` as long as directory symlinks stay inside that skill's
+    resolved folder. Directory symlinks leading outside the skill folder and
+    skills that exceed ``MAX_FILES_PER_SKILL`` files are stopped and listed in
+    ``skipped`` so a symlink to e.g. ``/usr`` cannot stall the scan.
     """
+    file_limit = MAX_FILES_PER_SKILL if max_files_per_skill is None else max_files_per_skill
     is_dir, problem = _stat_dir(root)
     if problem:
-        return [], [(root, problem)]
+        return [], [(root, problem)], []
     if not is_dir:
-        return [], []
+        return [], [], []
 
     try:
         root_stat = os.stat(root)
     except OSError as exc:
-        return [], [(root, str(exc))]
+        return [], [(root, str(exc))], []
 
-    visited_dirs: set[tuple[int, int]] = {(root_stat.st_dev, root_stat.st_ino)}
+    root_key = (root_stat.st_dev, root_stat.st_ino)
+    root_via_symlink = root.is_symlink()
+    max_dirs = max(file_limit * 4, 1_000)
+
     collected: list[tuple[Path, Path, bool]] = []
     errors: list[tuple[Path, str]] = []
+    skipped: list[str] = []
 
-    def _walk(directory: Path, via_symlink: bool) -> None:
+    try:
+        top_entries = sorted(os.scandir(root), key=lambda e: e.name)
+    except OSError as exc:
+        return [], [(root, str(exc))], []
+
+    def _walk_skill(skill_root_dir: Path, skill_boundary: Path, start_via_symlink: bool) -> None:
+        visited_dirs: set[tuple[int, int]] = {root_key}
         try:
-            entries = sorted(os.scandir(directory), key=lambda e: e.name)
+            skill_stat = os.stat(skill_root_dir)
         except OSError as exc:
-            errors.append((directory, str(exc)))
+            errors.append((skill_root_dir, str(exc)))
             return
-        for entry in entries:
-            entry_via_symlink = via_symlink or entry.is_symlink()
-            try:
-                st = os.stat(entry.path)
-            except (FileNotFoundError, NotADirectoryError):
-                # A broken or dangling link names no file to scan.
-                continue
-            except OSError as exc:
-                errors.append((Path(entry.path), str(exc)))
-                continue
-            entry_path = Path(entry.path)
-            if stat.S_ISDIR(st.st_mode):
-                key = (st.st_dev, st.st_ino)
-                if key in visited_dirs:
-                    continue
-                visited_dirs.add(key)
-                _walk(entry_path, entry_via_symlink)
-            elif stat.S_ISREG(st.st_mode):
-                try:
-                    resolved = entry_path.resolve()
-                except OSError:
-                    resolved = Path(os.path.abspath(entry_path))
-                collected.append((entry_path, resolved, entry_via_symlink))
+        visited_dirs.add((skill_stat.st_dev, skill_stat.st_ino))
 
-    _walk(root, root.is_symlink())
-    return collected, errors
+        files_seen = 0
+        dirs_seen = 1
+        capped = False
+
+        def _descend(directory: Path, via_symlink: bool) -> None:
+            nonlocal files_seen, dirs_seen, capped
+            if capped:
+                return
+            try:
+                entries = sorted(os.scandir(directory), key=lambda e: e.name)
+            except OSError as exc:
+                errors.append((directory, str(exc)))
+                return
+            for entry in entries:
+                if capped:
+                    return
+                entry_via_symlink = via_symlink or entry.is_symlink()
+                try:
+                    st = os.stat(entry.path)
+                except (FileNotFoundError, NotADirectoryError):
+                    # A broken or dangling link names no file to scan.
+                    continue
+                except OSError as exc:
+                    errors.append((Path(entry.path), str(exc)))
+                    continue
+                entry_path = Path(entry.path)
+                if stat.S_ISDIR(st.st_mode):
+                    if entry.is_symlink():
+                        resolved_dir = _resolve_path(entry_path)
+                        if not resolved_dir.is_relative_to(skill_boundary):
+                            skipped.append(
+                                f"{entry_path} -> {resolved_dir} (symlink outside skill folder)"
+                            )
+                            continue
+                    key = (st.st_dev, st.st_ino)
+                    if key in visited_dirs:
+                        continue
+                    dirs_seen += 1
+                    if dirs_seen > max_dirs:
+                        capped = True
+                        skipped.append(f"{skill_root_dir} (stopped after {max_dirs} directories)")
+                        return
+                    visited_dirs.add(key)
+                    _descend(entry_path, entry_via_symlink)
+                elif stat.S_ISREG(st.st_mode):
+                    if files_seen >= file_limit:
+                        capped = True
+                        skipped.append(f"{skill_root_dir} (stopped after {file_limit} files)")
+                        return
+                    files_seen += 1
+                    collected.append((entry_path, _resolve_path(entry_path), entry_via_symlink))
+
+        _descend(skill_root_dir, start_via_symlink)
+
+    root_files_seen = 0
+    root_files_capped = False
+    for entry in top_entries:
+        entry_via_symlink = root_via_symlink or entry.is_symlink()
+        try:
+            st = os.stat(entry.path)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError as exc:
+            errors.append((Path(entry.path), str(exc)))
+            continue
+        entry_path = Path(entry.path)
+        if stat.S_ISDIR(st.st_mode):
+            if (st.st_dev, st.st_ino) == root_key:
+                continue
+            _walk_skill(entry_path, _resolve_path(entry_path), entry_via_symlink)
+        elif stat.S_ISREG(st.st_mode):
+            if root_files_capped:
+                continue
+            if root_files_seen >= file_limit:
+                root_files_capped = True
+                skipped.append(f"{root} (stopped after {file_limit} files)")
+                continue
+            root_files_seen += 1
+            collected.append((entry_path, _resolve_path(entry_path), entry_via_symlink))
+
+    return collected, errors, skipped
 
 
 def scan_installed(
@@ -426,6 +539,7 @@ def scan_installed(
     home: Path | None = None,
     cwd: Path | None = None,
     extensions: set[str] | None = None,
+    max_files_per_skill: int | None = None,
 ) -> InstalledScanReport:
     """Discover and scan installed skills across known coding agents."""
     active_scanner = scanner or SkillScanner()
@@ -435,10 +549,12 @@ def scan_installed(
     chosen_files: dict[Path, _CandidateFile] = {}
     chosen_unscanned: set[Path] = set()
     discovery_errors: list[_DiscoveryError] = []
+    skipped_items: list[str] = []
 
     for loc_idx, loc in enumerate(locations):
         if loc.is_plugins_dir:
-            roots, failed = _claude_plugin_skill_roots(loc.path)
+            roots, failed, skipped_dirs = _claude_plugin_skill_roots(loc.path)
+            skipped_items.extend(skipped_dirs)
         else:
             is_dir, problem = _stat_dir(loc.path)
             roots = [loc.path] if is_dir else []
@@ -455,7 +571,10 @@ def scan_installed(
             )
 
         for skill_root in roots:
-            walked, failed = _walk_files(skill_root)
+            walked, failed, skipped_walk = _walk_files(
+                skill_root, max_files_per_skill=max_files_per_skill
+            )
+            skipped_items.extend(skipped_walk)
             for path, message in failed:
                 discovery_errors.append(
                     _DiscoveryError(
@@ -602,6 +721,7 @@ def scan_installed(
         results.append(result)
 
     unscanned = sorted(str(p) for p in chosen_unscanned if p not in chosen_files)
+    skipped = sorted(set(skipped_items))
     metadata: dict[str, object] = {
         "locations": [
             {
@@ -615,6 +735,8 @@ def scan_installed(
     }
     if unscanned:
         metadata["unscanned"] = unscanned
+    if skipped:
+        metadata["skipped"] = skipped
 
     batch = BatchScanReport(results=results, metadata=metadata)
     return InstalledScanReport(locations=counted_locations, entries=entries, report=batch)
@@ -702,6 +824,12 @@ def format_installed_text(
         lines.append(f"  UNSCANNED ({len(unscanned)})")
         for path in unscanned:
             lines.append(f"    {path}")
+
+    skipped = report.metadata.get("skipped") or []
+    if skipped:
+        lines.append(f"  SKIPPED ({len(skipped)})")
+        for item in skipped:
+            lines.append(f"    {item}")
 
     lines.append("=" * 64)
     return "\n".join(lines)

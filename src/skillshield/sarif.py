@@ -99,8 +99,34 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
     rule_id_to_index = {rid: i for i, rid in enumerate(all_rule_ids)}
 
     sarif_results: list[dict[str, Any]] = []
+    notifications: list[dict[str, Any]] = []
     for scan_result in results:
         uri = _artifact_uri(scan_result.file_path or scan_result.skill_name)
+        if scan_result.risk_level == "ERROR" or scan_result.error:
+            artifact_location: dict[str, Any] = {"uri": uri}
+            if not scan_result.file_path:
+                artifact_location["uriBaseId"] = "%SRCROOT%"
+            notification: dict[str, Any] = {
+                "level": "error",
+                "message": {
+                    "text": scan_result.error
+                    or f"Failed to scan {scan_result.file_path or scan_result.skill_name}"
+                },
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": artifact_location,
+                        }
+                    }
+                ],
+            }
+            if scan_result.agent:
+                notification["properties"] = {
+                    "agent": scan_result.agent,
+                    "skill": scan_result.skill_name,
+                    "path": scan_result.file_path or scan_result.skill_name,
+                }
+            notifications.append(notification)
         for finding in scan_result.findings:
             level = _SEVERITY_TO_LEVEL.get(finding.severity, "warning")
             message_text = (
@@ -157,6 +183,13 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
         },
         "results": sarif_results,
     }
+    if notifications:
+        run["invocations"] = [
+            {
+                "executionSuccessful": False,
+                "toolExecutionNotifications": notifications,
+            }
+        ]
 
     return {
         "$schema": _SARIF_SCHEMA,
@@ -176,6 +209,8 @@ def report_to_sarif(report: BatchScanReport) -> dict[str, Any]:
     log = results_to_sarif(report.results)
     properties = log["runs"][0].setdefault("properties", {})
     properties["unscanned"] = report.metadata.get("unscanned") or []
+    if "skipped" in report.metadata:
+        properties["skipped"] = report.metadata["skipped"]
     if "locations" in report.metadata:
         properties["locations"] = report.metadata["locations"]
     return log

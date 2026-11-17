@@ -165,6 +165,7 @@ def _emit_installed(installed, args) -> int:
             "errors": report.error_count,
             "flag_rate": report.flag_rate,
             "unscanned": report.metadata.get("unscanned") or [],
+            "skipped": report.metadata.get("skipped") or [],
             "results": [
                 {
                     "agent": r.agent,
