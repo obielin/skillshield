@@ -105,7 +105,7 @@ def test_sarif_lists_every_file_the_scan_skipped(tmp_path):
     (tmp_path / "SKILL.md").write_text("hello", encoding="utf-8")
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    (scripts / "setup.ps1").write_text("Write-Host hello\n", encoding="utf-8")
+    (scripts / "setup.docx").write_bytes(b"PK")
     (tmp_path / "helper.zip").write_bytes(b"PK\x03\x04")
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "notes.md").write_text(RISKY, encoding="utf-8")
@@ -120,11 +120,11 @@ def test_sarif_lists_every_file_the_scan_skipped(tmp_path):
         ".venv/notes.md",
         ".venv/pyvenv.cfg",
         "helper.zip",
-        "scripts/setup.ps1",
+        "scripts/setup.docx",
     ]
     summary = (tmp_path / "summary.md").read_text()
     assert "| Unscanned files | 5 |" in summary
-    assert "`scripts/setup.ps1`" in summary
+    assert "`scripts/setup.docx`" in summary
 
 
 def test_a_file_scanned_by_a_later_input_is_not_listed_as_skipped(tmp_path):

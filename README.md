@@ -113,7 +113,7 @@ The URL may name a whole repository, a branch/tag/commit (`/tree/<ref>`), or a s
 Exit codes match a folder scan: `0` clean, `1` CRITICAL or HIGH, and `2` for a download or unpacking error. Scanning a local path stays fully offline; SkillShield only goes online when you give it a URL.
 
 A directory scan reads every file with one of these extensions, in all subdirectories:
-`.md`, `.mdc`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
+`.md`, `.mdc`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.js`, `.ts`, `.sh`, `.bash`, `.ps1`, `.psm1`, `.bat`, `.cmd`, `.rb`, `.pl`, `.applescript`, `.toml`, `.xml`, `.html`.
 
 It also scans extensionless `.cursorrules`, `.windsurfrules` and `.clinerules` files, plus every file under `.clinerules/`. Roo Code's [documented rule files](https://github.com/RooCodeInc/Roo-Code/blob/main/apps/docs/docs/features/custom-instructions.md) (`.roorules`, `.roorules-*`, `.roo/rules/` and `.roo/rules-*/`) and Zed's [`.rules` instruction file](https://zed.dev/docs/ai/instructions) are included too. Continue's [`.continue/rules/` Markdown and YAML files](https://docs.continue.dev/customize/deep-dives/rules) already use supported extensions.
 

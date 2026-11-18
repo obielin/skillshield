@@ -132,8 +132,7 @@ def test_safe_sample_is_not_flagged(path):
 # file -> what is missing.
 SKILL_FOLDER = CORPUS / "skill-folder"
 FOLDER_GAPS = {
-    "scripts/install": "script without an extension is skipped (no shebang check) (#40)",
-    "scripts/setup.ps1": "PowerShell scripts are skipped (#40)",
+    "scripts/install": "curl piped into a shell is not flagged yet (#30)",
     "helper.zip": "password-protected archive is skipped (#41)",
     "plain.zip": "archive contents are not scanned (#41)",
     "guide.docx": "document archive contents are not scanned (#41)",
@@ -156,7 +155,8 @@ def test_payload_file_in_skill_folder_is_flagged(name):
 def test_payload_files_with_no_scanned_extension_are_reported_as_unscanned():
     report = SkillScanner().scan_directory(SKILL_FOLDER)
     unscanned = set(report.metadata.get("unscanned", []))
-    assert set(FOLDER_GAPS) <= unscanned, f"unscanned: {sorted(unscanned)}"
+    # scripts/install is read now (it starts with a shebang), so only the rest are unscanned.
+    assert set(FOLDER_GAPS) - {"scripts/install"} <= unscanned, f"unscanned: {sorted(unscanned)}"
 
 
 def test_threat_coverage_summary_counts_match_the_corpus():

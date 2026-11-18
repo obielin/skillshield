@@ -870,6 +870,9 @@ _RUG_PULL_PATTERNS = [
     # The ClawHavoc execution trigger was a short `base64 -D | bash` chain, so
     # this must not depend on the length of the encoded string (SG-008 needs 60+).
     r"(?:base64\s+(?:-d|-D|--decode)|openssl\s+base64\s+(?:-d|-D|--decode)|certutil\s+-decode)\b[^\n|]*\|\s*(?:sudo\s+)?(?:\S*/)?(?:sh|bash|zsh|dash|ksh|python[0-9.]*|eval)\b",
+    # PowerShell download and run: the download piped to Invoke-Expression / iex, or passed to it.
+    r"\b(?:Invoke-WebRequest|Invoke-RestMethod|iwr|irm|DownloadString)\b[^\n]*\|\s*(?:Invoke-Expression|iex)\b",
+    r"\b(?:Invoke-Expression|iex)\b[^\n]*?\b(?:Invoke-WebRequest|Invoke-RestMethod|iwr|irm|DownloadString)\b",
 ]
 _RUG_PULL_RE = re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTILINE)
 
@@ -895,6 +898,7 @@ RULE_RUG_PULL = Rule(
         "and exec, eval or compile run on data decoded or decompressed in the same call "
         "(base64, Ascii85, hex, rot13, zlib and other decompress calls, marshal, atob, "
         "Buffer.from base64), "
+        "and a PowerShell download passed to Invoke-Expression (iex), "
         "so the code that runs never appears in readable form (Snyk ToxicSkills)."
     ),
     remediation=(
