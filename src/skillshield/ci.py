@@ -36,6 +36,7 @@ from skillshield.scanner import (
     SkillScanner,
     _dir_is_skipped,
     _is_agent_rule_file,
+    _is_shebang_script,
     _is_tool_listing_file,
 )
 
@@ -98,7 +99,12 @@ def _is_scanned(path: Path, root: Path) -> bool:
         current = current / part
         if _dir_is_skipped(current):
             return False
-    return suffix in SKILL_EXTENSIONS or _is_agent_rule_file(path) or _is_tool_listing_file(path)
+    return (
+        suffix in SKILL_EXTENSIONS
+        or _is_agent_rule_file(path)
+        or _is_tool_listing_file(path)
+        or _is_shebang_script(path)
+    )
 
 
 def _scan_paths(

@@ -15,7 +15,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 |---|---|
 | Malicious samples covered | 9 of 31 |
 | Malicious samples with an open gap | 22 of 31 |
-| Payload files in a skill folder covered | 1 of 6 |
+| Payload files in a skill folder covered | 2 of 6 |
 | Safe samples wrongly flagged | 1 of 4 |
 
 ## Instruction override and hidden text
@@ -76,13 +76,13 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 ## Payload outside SKILL.md
 
-`tests/fixtures/redteam/skill-folder/` is one skill with a harmless `SKILL.md` and the payload in other files. A directory scan now flags the compiled `.pyc` (SG-014); the remaining files are listed as unscanned, because they have no scanned extension (#39).
+`tests/fixtures/redteam/skill-folder/` is one skill with a harmless `SKILL.md` and the payload in other files. A directory scan now flags the compiled `.pyc` (SG-014); `scripts/setup.ps1` (SG-006) and reads extensionless scripts that start with a shebang; the archives are listed as unscanned, because they have no scanned extension (#39).
 
 | File | Technique | Source | Status |
 |---|---|---|---|
 | `scripts/format.pyc` | Compiled Python with no source | [Trail of Bits via CSA][csa] | Covered (SG-014) |
-| `scripts/install` | Shell script with no extension | [Snyk ToxicSkills][snyk-tox] | Gap: #40 |
-| `scripts/setup.ps1` | PowerShell download and run | [The Hacker News][thn] | Gap: #40 |
+| `scripts/install` | Shell script with no extension | [Snyk ToxicSkills][snyk-tox] | Gap: read since #40, but a `curl` download piped into a shell is not flagged until #30 |
+| `scripts/setup.ps1` | PowerShell download and run | [The Hacker News][thn] | Covered (SG-006) |
 | `helper.zip` | Password-protected archive | [Snyk ClawdHub campaign][snyk-camp] | Gap: #41 |
 | `plain.zip` | Archive with an instruction inside | [Snyk ClawdHub campaign][snyk-camp] | Gap: #41 |
 | `guide.docx` | Document archive with an instruction inside | [Trail of Bits via CSA][csa] | Gap: #41 |

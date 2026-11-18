@@ -51,6 +51,13 @@ SKILL_EXTENSIONS = {
     ".ts",
     ".sh",
     ".bash",
+    ".ps1",
+    ".psm1",
+    ".bat",
+    ".cmd",
+    ".rb",
+    ".pl",
+    ".applescript",
     ".toml",
     ".xml",
     ".html",
@@ -71,6 +78,21 @@ def _is_agent_rule_file(path: Path) -> bool:
         )
         for parent in path.parents
     )
+
+
+def _is_shebang_script(path: Path) -> bool:
+    """Whether a file with no extension starts with a shebang (``#!``).
+
+    Install scripts are often named ``install`` or ``setup``. Only the first two bytes
+    are read, so a large extensionless data file is skipped without being read.
+    """
+    if path.suffix:
+        return False
+    try:
+        with path.open("rb") as source:
+            return source.read(2) == b"#!"
+    except OSError:
+        return False
 
 
 # Files that can hold an MCP tool listing. A .json file is always scanned; a .jsonl
@@ -493,7 +515,10 @@ class SkillScanner:
         paths = [
             p
             for p in all_files
-            if p.suffix.lower() in exts or _is_agent_rule_file(p) or _is_tool_listing_file(p)
+            if p.suffix.lower() in exts
+            or _is_agent_rule_file(p)
+            or _is_tool_listing_file(p)
+            or _is_shebang_script(p)
         ]
         selected_paths = set(paths)
         # A compiled file selected above already reaches
