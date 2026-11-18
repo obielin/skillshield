@@ -57,6 +57,24 @@ class Rule:
 
 # ── SG-001: Prompt Injection ───────────────────────────────────
 
+_UNLOCKED_MODE = r"(?:developer|debug|god|admin|sudo|unrestricted)"
+
+# What a fake <SYSTEM> / <IMPORTANT> block says to the agent: ignore or bypass the rules,
+# hide something from the user, act before using a tool, read a secret file, or take a
+# mode with no restrictions. A negated override ("never ignore ...") is not one.
+_AUTHORITY_DIRECTED = (
+    r"(?:(?<!not\s)(?<!never\s)(?<!n't\s)\b(?:ignore|disregard|bypass|override)\b[^\n.]{0,40}"
+    r"\b(?:instructions?|rules|guidelines|polic(?:y|ies)|safety|security|restrictions?|"
+    r"warnings?|guardrails?|filters?)\b"
+    r"|\b(?:do\s+not|don'?t|never)\s+(?:tell|mention|inform|reveal|disclose|show)\b"
+    r"[^\n.]{0,30}\b(?:user|human|anyone)\b"
+    r"|\bbefore\s+(?:using|calling|running|invoking)\s+(?:this|the|any)\s+(?:tool|function|command)\b"
+    r"|\b(?:read|cat|open|send|upload|include|pass)\b[^\n.]{0,40}"
+    r"(?:~/|/etc/(?:passwd|shadow)|\.ssh\b|\.env\b|id_rsa|credentials)"
+    r"|\byou\s+are\s+(?:now\s+)?(?:in|entering)\s+(?:a\s+)?" + _UNLOCKED_MODE + r"\s+mode\b"
+    r"|\b(?:security|safety)\s+(?:warnings?|checks?|alerts?)\s+(?:are|is)\b)"
+)
+
 _PROMPT_INJECTION_PATTERNS = [
     r"ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+instructions?",
     r"disregard\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+instructions?",
@@ -69,6 +87,30 @@ _PROMPT_INJECTION_PATTERNS = [
     r"developer\s+mode\s+enabled",
     r"pretend\s+(?:you\s+)?(?:have\s+no\s+)?(?:restrictions?|rules|guidelines)",
     r"(?:bypass|override|disable)\s+(?:your\s+)?(?:safety|content|ethical)\s+(?:filter|check|guardrail|policy)",
+]
+
+# Fake authority framing (#49). These run in their own pattern so that text without one of
+# the hint words below skips them.
+_PROMPT_INJECTION_FRAMING_PATTERNS = [
+    # Developer-mode framing (#49): "you are now in developer mode", and "you are in debug mode"
+    # when the same sentence goes on to talk about warnings, restrictions or safety.
+    rf"you\s+are\s+now\s+(?:in|entering|operating\s+in)\s+(?:a\s+)?{_UNLOCKED_MODE}\s+mode\b",
+    rf"you\s+are\s+(?:currently\s+)?in\s+(?:a\s+)?{_UNLOCKED_MODE}\s+mode\b[^\n]{{0,200}}"
+    r"(?:warnings?|restrictions?|safety|security|guidelines?|filters?|rules|checks?)\b",
+    # Telling the agent that security or safety warnings are tests, or should be ignored.
+    r"\b(?:security|safety)\s+(?:warnings?|checks?|alerts?|filters?|guardrails?)\s+"
+    r"(?:are|is)\s+(?:just\s+|only\s+)?(?:test\s+artifacts?|tests?|not\s+real)\b",
+    r"\b(?:security|safety)\s+(?:warnings?|checks?|alerts?|findings?)\s+"
+    r"(?:must|should)\s+be\s+(?:ignored|disregarded|bypassed)\b",
+    r"(?<!not\s)(?<!never\s)(?<!n't\s)\b(?:ignore|disregard)\s+(?:any|all|every|the)\s+"
+    r"(?:security|safety)\s+(?:warnings?|checks?|alerts?)\b",
+    # A fake authority tag or heading that carries an instruction aimed at the agent:
+    # <SYSTEM>, <IMPORTANT>, <ADMIN>, [SYSTEM] or "### SYSTEM". A tag used as ordinary
+    # formatting ("<important>Save your work first</important>") has no such instruction.
+    r"<\s*(?:system|important|admin|administrator|sys|instructions?|override)\s*>"
+    rf"[^<]{{0,400}}?{_AUTHORITY_DIRECTED}",
+    r"^[ \t]*(?:\[\s*(?:system|admin|important)\s*\]|#{1,6}[ \t]*system[ \t]*:?[ \t]*$)"
+    rf"[\s\S]{{0,200}}?{_AUTHORITY_DIRECTED}",
 ]
 
 # Chinese, Simplified and Traditional (#66). A pattern stays inside one sentence,
@@ -329,6 +371,16 @@ _PROMPT_INJECTION_PATTERNS_KO = [
 _PROMPT_INJECTION_RE = re.compile(
     "|".join(_PROMPT_INJECTION_PATTERNS), re.IGNORECASE | re.MULTILINE
 )
+_PROMPT_INJECTION_FRAMING_RE = re.compile(
+    "|".join(_PROMPT_INJECTION_FRAMING_PATTERNS), re.IGNORECASE | re.MULTILINE
+)
+# A fake-authority pattern needs one of these: a mode, a security or safety word, an authority
+# tag or an authority heading. Most files have none, and then the framing patterns do not run.
+_FRAMING_HINT = re.compile(
+    r"mode\b|security|safety|<\s*(?:system|important|admin|administrator|sys|instructions?|override)"
+    r"|\[\s*(?:system|admin|important)|#\s*system",
+    re.IGNORECASE,
+)
 _PROMPT_INJECTION_CJK_RE = re.compile(
     "|".join(_PROMPT_INJECTION_PATTERNS_ZH + _PROMPT_INJECTION_PATTERNS_JA), re.MULTILINE
 )
@@ -342,6 +394,8 @@ _HANGUL_CHAR = re.compile(r"[\uac00-\ud7a3]")
 
 def _check_prompt_injection(text: str) -> list[str]:
     found = list(_PROMPT_INJECTION_RE.finditer(text))
+    if _FRAMING_HINT.search(text):
+        found += _PROMPT_INJECTION_FRAMING_RE.finditer(text)
     if _CJK_CHAR.search(text):
         found += _PROMPT_INJECTION_CJK_RE.finditer(text)
     if _HANGUL_CHAR.search(text):

@@ -75,7 +75,6 @@ KNOWN_GAPS = {
     "17-paste-site-script": "install script from a paste site pasted into a terminal (#45)",
     "18-memory-poisoning": "writes instructions into agent memory files (#47)",
     "19-persistence-service": "installs a system service or cron job (#48)",
-    "20-fake-system-tag": "fake <SYSTEM> tag and developer-mode framing (#49)",
     "21-suppress-security-warnings": "tells the agent to hide security findings (#50)",
     "22-cross-tool-hijack": "instruction that changes how other tools run (#51)",
     "25-remote-instructions": "fetches instructions from a URL at run time and follows them (#52)",
