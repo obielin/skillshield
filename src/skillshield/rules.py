@@ -1246,12 +1246,27 @@ RULE_COVERT_CHANNEL = Rule(
 
 # ── SG-010: Social Engineering ────────────────────────────────
 
+_TERMINAL_TARGET = (
+    r"\b(?:in|into|to|onto)\s+(?:the\s+|a\s+|your\s+|an\s+)?(?:\w+\s+)?"
+    r"(?:terminal|shell|powershell|command\s+(?:prompt|line)|cmd|console|bash|zsh"
+    r"|run\s+(?:dialog|box|window))\b"
+)
 _SOCIAL_ENG_PATTERNS = [
     r"(?:urgently?|immediately|right\s+now|without\s+delay)\s+(?:click|share|send|provide|give|enter)\s+(?:your\s+)?(?:password|credentials?|code|token|otp|verification)",
     r"(?:your\s+account\s+(?:will\s+be\s+)?(?:suspended|deleted|banned|locked)|you\s+will\s+lose\s+access)",
     r"(?:verify|confirm)\s+(?:your\s+)?(?:identity|account|details?)\s+(?:by\s+(?:clicking|entering|providing))",
     r"(?:free|won|prize|congratulations|selected|chosen)\s+.{0,50}(?:click|enter|provide|send)",
     r"(?:IT\s+support|help\s+desk|security\s+team|administrator)\s+(?:needs?|requires?|requests?)\s+(?:your\s+)?(?:password|access|credentials?)",
+    # The "fake prerequisite" lure: copy a script from a website and paste it into a terminal,
+    # a PowerShell window or the Windows Run dialog (the ClawHavoc macOS lure, a script on
+    # glot.io). A command shown in the skill itself ("paste the command below into your
+    # terminal") is ordinary documentation and is not flagged: the script has to come from
+    # somewhere else.
+    r"\b(?:copy|grab|get|take|download)\b[^\n]{0,80}?\bfrom\b[^\n]{0,120}?\bpaste\b[^\n]{0,60}?"
+    + _TERMINAL_TARGET,
+    r"\bpaste\b[^\n]{0,60}?\bfrom\b[^\n]{0,80}?" + _TERMINAL_TARGET,
+    # Pasting into the Run dialog is never an install step.
+    r"\bpaste\b[^\n]{0,60}?\b(?:run\s+(?:dialog|box|window)|win(?:dows)?\s*\+\s*r)\b",
 ]
 
 RULE_SOCIAL_ENG = Rule(
@@ -1261,7 +1276,9 @@ RULE_SOCIAL_ENG = Rule(
     description=(
         "The skill contains social engineering language designed to manipulate "
         "users into providing credentials, clicking malicious links, or taking "
-        "urgent unplanned action under false pretences."
+        "urgent unplanned action under false pretences. It also flags the fake "
+        "prerequisite lure of copying a script from a website or paste site and pasting "
+        "it into a terminal or the Run dialog (the ClawHavoc macOS lure)."
     ),
     remediation=(
         "Legitimate skills never create artificial urgency or ask users to "
@@ -1346,6 +1363,12 @@ def _check_suspicious_urls(text: str) -> list[str]:
             r"(?:ngrok|tunnel|webhook\.site|requestbin|pipedream|burpcollaborator)", re.IGNORECASE
         ),
         re.compile(r"(?:pastebin|hastebin|ghostbin|rentry\.co)", re.IGNORECASE),
+        # More code-paste hosts, matched on the host so a path such as /10bin/ is not a match.
+        re.compile(
+            r"^https?://(?:[\w-]+\.)*"
+            r"(?:glot\.io|paste\.ee|0bin\.net|dpaste\.(?:com|org)|pastes\.dev)(?=[:/?#]|$)",
+            re.IGNORECASE,
+        ),
         re.compile(r"(?:bit\.ly|tinyurl|t\.co|rb\.gy|is\.gd|ow\.ly)/"),
         re.compile(r"\.(?:xyz|tk|ml|ga|cf|gq|top)\b"),
     ]
@@ -1366,7 +1389,7 @@ RULE_SUSPICIOUS_URLS = Rule(
     description=(
         "The skill references URLs associated with data exfiltration infrastructure: "
         "raw IP addresses, tunnelling services (ngrok), URL shorteners, pastebin sites, "
-        "or high-abuse TLDs (.xyz, .tk). These are commonly used as C2 endpoints."
+        "code-paste sites (glot.io, paste.ee, dpaste, pastes.dev), or high-abuse TLDs (.xyz, .tk). These are commonly used as C2 endpoints."
     ),
     remediation=(
         "Verify all URLs in the skill. Legitimate skills should reference well-known "

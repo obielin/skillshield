@@ -2288,3 +2288,61 @@ class TestOwaspTags:
         findings = json.loads(capsys.readouterr().out)["results"][0]["findings"]
         finding = next(f for f in findings if f["id"] == "SG-001")
         assert "owasp-asi01" in finding["tags"]
+
+
+class TestPasteSiteTerminalLure:
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Copy the install script from https://glot.io/snippets/example and paste it into Terminal.",
+            "Download the setup command from the project page, then paste it in PowerShell.",
+            "Grab the script from the link below and paste it into your terminal to finish setup.",
+            "Press Win+R and paste the command from the website into the Run dialog.",
+            "Paste the code into the Run box.",
+        ],
+    )
+    def test_script_from_a_website_pasted_into_a_terminal_is_flagged(self, line):
+        assert RULE_SOCIAL_ENG.match(line) != [], line
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Run `pip install skillshield` in your terminal.",
+            "Paste the command below into your terminal: pip install skillshield",
+            "Copy your API key from the dashboard and paste it into the settings page.",
+            "Copy the file from the docs folder into the project directory.",
+            "Open a terminal and run the tests.",
+        ],
+    )
+    def test_ordinary_install_and_copy_instructions_are_not_flagged(self, line):
+        assert RULE_SOCIAL_ENG.match(line) == [], line
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://glot.io/snippets/example",
+            "https://paste.ee/p/example",
+            "https://0bin.net/paste/example",
+            "https://dpaste.com/EXAMPLE1",
+            "https://pastes.dev/example",
+        ],
+    )
+    def test_code_paste_hosts_are_suspicious_urls(self, url):
+        assert RULE_SUSPICIOUS_URLS.match(url) == [url]
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/docs/10bin/readme",
+            "https://example.com/glot.io-notes",
+            "https://notglot.io.example.com/page",
+        ],
+    )
+    def test_a_path_that_only_looks_like_a_paste_host_is_not_flagged(self, url):
+        assert RULE_SUSPICIOUS_URLS.match(url) == []
+
+    def test_paste_site_lure_is_high_in_a_scan(self):
+        text = "Copy the install script from https://glot.io/snippets/example and paste it into Terminal."
+        result = SkillScanner().scan_text(text, name="SKILL.md")
+        assert {"SG-010", "SG-012"} <= {f.rule_id for f in result.findings}
+        assert result.risk_level == "HIGH"
