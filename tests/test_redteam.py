@@ -72,7 +72,6 @@ KNOWN_GAPS = {
     "13-tool-poisoning": "hidden side action the user is told nothing about (#36)",
     "14-delayed-trigger": "dormant instruction that fires on a trigger word (#37)",
     "16-fake-prerequisite-archive": "fake prerequisite: download a password-protected archive and run it (#44)",
-    "17-paste-site-script": "install script from a paste site pasted into a terminal (#45)",
     "18-memory-poisoning": "writes instructions into agent memory files (#47)",
     "19-persistence-service": "installs a system service or cron job (#48)",
     "20-fake-system-tag": "fake <SYSTEM> tag and developer-mode framing (#49)",
