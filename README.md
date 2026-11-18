@@ -363,7 +363,7 @@ and never calls a tool: the scan works offline and sends nothing.
 
 | Rule | Severity | Name | What it looks for |
 |---|---|---|---|
-| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode", and the same overrides in Chinese, Japanese and Korean. |
+| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode", and the same overrides in Chinese, Japanese and Korean, "you are now in developer mode", telling the agent that security warnings are tests or should be ignored, and a fake `<SYSTEM>`, `<IMPORTANT>`, `<ADMIN>`, `[SYSTEM]` or `### SYSTEM` block that carries such an instruction. |
 | SG-002 | CRITICAL | Data Exfiltration | Sending files, secrets, keys or tokens out. Webhook calls, reads of `/etc/passwd` or `.env`, `socket` calls, and `subprocess` calls to `curl`, `wget` or `nc`. |
 | SG-003 | CRITICAL | Privilege Escalation | `sudo` with `rm`, `chmod` or a shell, `chmod 777`, `os.system`, `shell=True`, `eval` or `exec` on input, and turning off SELinux, AppArmor, UAC, Gatekeeper or SIP. |
 | SG-004 | HIGH | Identity Hijacking | Instructions to pose as a human or hide that the agent is an AI. |
