@@ -1886,6 +1886,43 @@ RULE_SUSPICIOUS_TOOL_NAME = Rule(
 )
 
 
+# ── SG-106: Excessive Tool Count ───────────────────────────────
+
+_MAX_MCP_TOOLS = 50
+
+
+def _check_excessive_tool_count(listing: ToolListing) -> list[tuple[McpTool, str]]:
+    count = len(listing.tools)
+    if count <= _MAX_MCP_TOOLS:
+        return []
+    return [
+        (
+            tool,
+            _escape_control_characters(
+                f"Tool '{tool.name}': server exposes {count} tools (threshold: {_MAX_MCP_TOOLS})"
+            ),
+        )
+        for tool in listing.tools
+    ]
+
+
+RULE_EXCESSIVE_TOOL_COUNT = Rule(
+    id="SG-106",
+    name="Excessive Tool Count",
+    severity=Severity.LOW,
+    description=(
+        "An MCP server exposes more than 50 tools, increasing tool-selection confusion "
+        "and the attack surface for tool poisoning. Ported from mcpscan MR-007."
+    ),
+    remediation=(
+        "Expose only the tools needed for the task, or split the server into smaller "
+        "scoped tool sets that users enable explicitly."
+    ),
+    listing_fn=_check_excessive_tool_count,
+    tags=["mcp", "tool-count", "owasp-asi02", "owasp-ast03"],
+)
+
+
 # ── All rules ──────────────────────────────────────────────────
 
 ALL_RULES: list[Rule] = [
@@ -1905,4 +1942,5 @@ ALL_RULES: list[Rule] = [
     RULE_BRAND_NAME_IMPERSONATION,
     RULE_COMPILED_PYTHON,
     RULE_SUSPICIOUS_TOOL_NAME,
+    RULE_EXCESSIVE_TOOL_COUNT,
 ]
