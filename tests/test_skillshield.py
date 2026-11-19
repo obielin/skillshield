@@ -2293,6 +2293,10 @@ class TestOwaspTags:
 @pytest.mark.parametrize(
     "tool_name, properties, expected",
     [
+        ("delete_folder", {"path": {"type": "string"}}, True),
+        ("list_directories", {"path": {"type": "string"}}, True),
+        ("read_files", {"paths": {"type": "array", "items": {"enum": ["docs/a.md"]}}}, False),
+        ("read_files", {"paths": {"type": "array", "items": {"type": "string"}}}, True),
         ("read_file", {"path": {"type": "string"}, "encoding": {"enum": ["utf-8"]}}, True),
         (
             "copyFile",

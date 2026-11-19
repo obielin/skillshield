@@ -81,7 +81,7 @@ skillshield scan SKILL.md                  # scan one file
 skillshield scan ./skills/                 # scan a directory
 skillshield scan - < SKILL.md              # scan stdin
 skillshield check "some text to scan"      # scan text given on the command line
-skillshield rules                          # list the 15 rules
+skillshield rules                          # list all rules
 skillshield --version
 ```
 
@@ -378,10 +378,10 @@ and never calls a tool: the scan works offline and sends nothing.
 | SG-013 | HIGH | Untrusted Package Registry | `pip`, `npm` or `yarn` pointed at a registry other than the official one -- `--index-url`, `--extra-index-url`, `-i`, `--registry`, `PIP_INDEX_URL`, `npm config set registry`, `yarn config set npmRegistryServer`, or a `pip.conf`, `.npmrc` or `.pypirc` line that sets an untrusted registry (`registry`, `@scope:registry`, `index-url`, `repository`). TestPyPI counts as untrusted: anyone can publish there. A later install then pulls the attacker's packages (dependency confusion, OWASP AST02). |
 | SG-014 | HIGH | Compiled Python Payload | A `.pyc` or `.pyo` file in a skill folder. Bytecode cannot be reviewed, and Python imports or runs it directly, so a payload can hide behind a harmless-looking skill that claims to call a `.py` script. If the matching `.py` source is missing, the finding names that source file (its file name, not its full path) and asks you to ship the source instead. |
 | SG-015 | MEDIUM | Well-known Skill Name Impersonation | Frontmatter names that closely resemble canonical skill names or add suspicious suffixes such as `1` or `-pro`. |
-| SG-103 | HIGH | Unrestricted Path Parameter | Each filesystem path parameter needs its own `pattern` or `enum`; a restriction on another field does not hide it. |
+| SG-103 | HIGH | Unrestricted Path Parameter | Each filesystem path parameter needs its own `pattern` or `enum` (including array `items`); a restriction on another field does not hide it. |
 | SG-104 | HIGH | Suspicious Tool Name | An MCP tool in a saved listing whose name suggests harmful behaviour, such as `harvest_credentials`, `exfiltrate_data`, `steal_cookies`, `leak_secrets`, `bypass_auth`, `intercept_requests`, `sniff_traffic`, `dump_credentials` or `upload_all_files`. Words are matched whole, so `stealth_mode_toggle` and `dump_truck_lookup` are not flagged. |
 
-That is 5 CRITICAL rules, 9 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
+That is 5 CRITICAL rules, 10 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
 
 In a saved MCP listing, the rules above read the file as it is saved, so a plain instruction
 in a tool's description is caught by SG-001 in the same way as in a skill. Text hidden behind

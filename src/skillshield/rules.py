@@ -1893,7 +1893,22 @@ def _check_unrestricted_paths(listing: ToolListing) -> list[tuple[McpTool, str]]
     matches = []
     for tool in listing.tools:
         if not set(_tool_name_words(tool.name)).intersection(
-            {"file", "files", "read", "write", "open", "path", "fs", "dir", "directory"}
+            {
+                "file",
+                "files",
+                "read",
+                "write",
+                "open",
+                "path",
+                "paths",
+                "fs",
+                "dir",
+                "dirs",
+                "directory",
+                "directories",
+                "folder",
+                "folders",
+            }
         ):
             continue
         properties = (tool.input_schema or {}).get("properties")
@@ -1902,8 +1917,14 @@ def _check_unrestricted_paths(listing: ToolListing) -> list[tuple[McpTool, str]]
         for name, schema in properties.items():
             if "path" not in name.lower():
                 continue
-            if isinstance(schema, dict) and ("pattern" in schema or "enum" in schema):
-                continue
+            if isinstance(schema, dict):
+                if "enum" in schema:
+                    continue
+                restriction = schema.get("items") if schema.get("type") == "array" else schema
+                if isinstance(restriction, dict) and (
+                    "pattern" in restriction or "enum" in restriction
+                ):
+                    continue
             snippet = (
                 f"Tool '{tool.name}': path parameter '{name}' has no pattern or enum restriction"
             )
