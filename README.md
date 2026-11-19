@@ -81,7 +81,7 @@ skillshield scan SKILL.md                  # scan one file
 skillshield scan ./skills/                 # scan a directory
 skillshield scan - < SKILL.md              # scan stdin
 skillshield check "some text to scan"      # scan text given on the command line
-skillshield rules                          # list the 15 rules
+skillshield rules                          # list all rules
 skillshield --version
 ```
 
@@ -381,7 +381,7 @@ and never calls a tool: the scan works offline and sends nothing.
 | SG-106 | LOW | Excessive Tool Count | A server exposes more than 50 tools, increasing tool-selection confusion and the attack surface for tool poisoning. |
 | SG-104 | HIGH | Suspicious Tool Name | An MCP tool in a saved listing whose name suggests harmful behaviour, such as `harvest_credentials`, `exfiltrate_data`, `steal_cookies`, `leak_secrets`, `bypass_auth`, `intercept_requests`, `sniff_traffic`, `dump_credentials` or `upload_all_files`. Words are matched whole, so `stealth_mode_toggle` and `dump_truck_lookup` are not flagged. |
 
-That is 5 CRITICAL rules, 9 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
+That is 5 CRITICAL rules, 9 HIGH rules, 2 MEDIUM rules and 1 LOW rule. Run `skillshield rules` to see each rule with its tags.
 
 In a saved MCP listing, the rules above read the file as it is saved, so a plain instruction
 in a tool's description is caught by SG-001 in the same way as in a skill. Text hidden behind
