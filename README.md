@@ -8,7 +8,7 @@ SkillShield is a first line of defence, not a complete one: see [Limitations](#l
 
 **Contributors welcome.** Pick an issue and comment `/assign` to claim it: [good first issues](https://github.com/obielin/skillshield/contribute) · [help wanted](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) · [detection gaps](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3Adetection-gap) · [roadmap](ROADMAP.md)
 
-[![Tests](https://img.shields.io/badge/Tests-291%20passing-brightgreen?style=flat-square)](tests/)
+[![CI](https://github.com/obielin/skillshield/actions/workflows/ci.yml/badge.svg)](https://github.com/obielin/skillshield/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/skillshield?style=flat-square)](https://pypi.org/project/skillshield/)
 [![Dependencies](https://img.shields.io/badge/Dependencies-zero-brightgreen?style=flat-square)](pyproject.toml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square)](pyproject.toml)
