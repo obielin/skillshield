@@ -2288,3 +2288,69 @@ class TestOwaspTags:
         findings = json.loads(capsys.readouterr().out)["results"][0]["findings"]
         finding = next(f for f in findings if f["id"] == "SG-001")
         assert "owasp-asi01" in finding["tags"]
+
+
+@pytest.mark.parametrize(
+    "tool_name, properties, expected",
+    [
+        ("read_file", {"path": {"type": "string"}, "encoding": {"enum": ["utf-8"]}}, True),
+        (
+            "copyFile",
+            {"source_path": {"enum": ["docs/a.md"]}, "destination_path": {"type": "string"}},
+            True,
+        ),
+        ("read_file", {"path": {"pattern": r"^docs/[a-z0-9_-]+\.md$"}}, False),
+        ("read_file", {"path": {"enum": ["docs/a.md"]}}, False),
+        ("profile_lookup", {"path": {"type": "string"}}, False),
+    ],
+)
+def test_mcp_unrestricted_path_parameter(tmp_path, tool_name, properties, expected):
+    import json
+
+    path = tmp_path / "tools.json"
+    path.write_text(
+        json.dumps(
+            {
+                "tools": [
+                    {
+                        "name": tool_name,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": properties,
+                        },
+                    }
+                ]
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    findings = [f for f in SkillScanner().scan_file(path).findings if f.rule.id == "SG-103"]
+    assert bool(findings) is expected
+    if expected:
+        assert tool_name in findings[0].snippets[0]
+        assert findings[0].line_numbers == [3]
+
+
+def test_mcp_path_rule_handles_ten_thousand_tools():
+    import time
+
+    from skillshield.mcp import McpTool, ToolListing
+    from skillshield.rules import ALL_RULES
+
+    rule = next(rule for rule in ALL_RULES if rule.id == "SG-103")
+    listing = ToolListing(
+        tools=[
+            McpTool(
+                name=f"read_file_{i}",
+                input_schema={
+                    "properties": {"path": {"type": "string"}},
+                },
+            )
+            for i in range(10_000)
+        ],
+        format="manifest",
+    )
+    start = time.perf_counter()
+    assert len(rule.match_listing(listing)) == 10_000
+    assert time.perf_counter() - start < 2.0
