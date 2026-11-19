@@ -2288,3 +2288,33 @@ class TestOwaspTags:
         findings = json.loads(capsys.readouterr().out)["results"][0]["findings"]
         finding = next(f for f in findings if f["id"] == "SG-001")
         assert "owasp-asi01" in finding["tags"]
+
+
+@pytest.mark.parametrize("count, expected", [(51, True), (75, True), (50, False), (1, False)])
+def test_mcp_excessive_tool_count(tmp_path, count, expected):
+    import json
+
+    path = tmp_path / "tools.json"
+    tools = [{"name": f"lookup_{i}", "inputSchema": {"type": "object"}} for i in range(count)]
+    path.write_text(json.dumps({"tools": tools}, indent=2), encoding="utf-8")
+    findings = [f for f in SkillScanner().scan_file(path).findings if f.rule.id == "SG-106"]
+    assert bool(findings) is expected
+    if expected:
+        assert "lookup_0" in findings[0].snippets[0]
+        assert str(count) in findings[0].snippets[0]
+        assert findings[0].line_numbers[0] == 3
+
+
+def test_mcp_tool_count_rule_handles_ten_thousand_tools():
+    import time
+
+    from skillshield.mcp import McpTool, ToolListing
+    from skillshield.rules import ALL_RULES
+
+    rule = next(rule for rule in ALL_RULES if rule.id == "SG-106")
+    listing = ToolListing(
+        tools=[McpTool(name=f"lookup_{i}") for i in range(10_000)], format="manifest"
+    )
+    start = time.perf_counter()
+    assert len(rule.match_listing(listing)) == 10_000
+    assert time.perf_counter() - start < 2.0
