@@ -1,6 +1,6 @@
 {
   "serverInfo": {"name": "remote", "version": "1.0.0"},
-  "auth": {"type": "bearer", "token": "sk-test-000000"},
+  "auth": {"type": "bearer", "token": "dummy-token-not-a-secret"},
   "url": "https://example.com/mcp",
   "tools": [
     {
