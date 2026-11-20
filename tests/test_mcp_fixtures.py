@@ -16,6 +16,18 @@ from skillshield.rules import Severity
 FIXTURES = Path(__file__).parent / "fixtures" / "mcp"
 ORDER = [Severity.INFO, Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
 
+# Malicious fixtures whose rules are not yet implemented. Remove from this set
+# once the corresponding rule lands and the test starts passing.
+KNOWN_GAPS = {
+    "sg-101-unsafe-auth",
+    "sg-102-overbroad-permissions",
+    "sg-103-unrestricted-path",
+    "sg-105-missing-schema",
+    "sg-106-excessive-tools",
+    # tool-poisoning is caught by existing text rules (SG-001)
+    # sg-104 is already implemented
+}
+
 
 def _worst(findings) -> Severity | None:
     return max((f.severity for f in findings), key=ORDER.index, default=None)
@@ -33,19 +45,6 @@ def _malicious_samples():
             marks.append(pytest.mark.xfail(reason=f"{path.stem} rule not yet implemented", strict=False))
         params.append(pytest.param(path, id=path.stem, marks=marks))
     return params
-
-
-# Malicious fixtures whose rules are not yet implemented. Remove from this set
-# once the corresponding rule lands and the test starts passing.
-KNOWN_GAPS = {
-    "sg-101-unsafe-auth",
-    "sg-102-overbroad-permissions",
-    "sg-103-unrestricted-path",
-    "sg-105-missing-schema",
-    "sg-106-excessive-tools",
-    # tool-poisoning is caught by existing text rules (SG-001)
-    # sg-104 is already implemented
-}
 
 
 @pytest.mark.parametrize("path", _safe_samples(), ids=lambda p: p.stem)
