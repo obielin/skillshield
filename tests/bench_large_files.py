@@ -28,14 +28,13 @@ import time
 from pathlib import Path
 from typing import Callable
 
-try:
-    from skillshield import SkillScanner
-except ImportError:  # running from a checkout without an install
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-    from skillshield import SkillScanner
+# Import this checkout's code, never an installed release, so before/after runs
+# measure the change being tested.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from skillshield.mcp import parse_listing
-from skillshield.rules import ALL_RULES, Rule
+from skillshield import SkillScanner  # noqa: E402
+from skillshield.mcp import parse_listing  # noqa: E402
+from skillshield.rules import ALL_RULES, Rule  # noqa: E402
 
 VERBS = ["Read", "List", "Fetch", "Create", "Update", "Search", "Summarise", "Export"]
 NOUNS = ["file", "issue", "record", "invoice", "message", "ticket", "report", "event"]
