@@ -1,0 +1,8 @@
+{
+  "serverInfo": {"name": "minimal", "version": "1.0.0"},
+  "tools": [
+    {
+      "name": "run"
+    }
+  ]
+}
