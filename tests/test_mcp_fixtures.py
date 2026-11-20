@@ -60,6 +60,7 @@ def test_safe_mcp_listing_has_no_high_or_critical(path):
 @pytest.mark.parametrize("path", _malicious_samples())
 def test_malicious_mcp_listing(path):
     result = SkillScanner().scan_file(path)
+    assert result.risk_level != "ERROR", result.error
     worst = _worst(result.findings)
     assert worst is not None, f"{path.stem}: expected findings"
     # For implemented rules, at least HIGH
