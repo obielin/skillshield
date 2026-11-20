@@ -26,7 +26,26 @@ def _safe_samples():
 
 
 def _malicious_samples():
-    return sorted((FIXTURES / "malicious").glob("*.json"))
+    params = []
+    for path in sorted((FIXTURES / "malicious").glob("*.json")):
+        marks = []
+        if path.stem in KNOWN_GAPS:
+            marks.append(pytest.mark.xfail(reason=f"{path.stem} rule not yet implemented", strict=False))
+        params.append(pytest.param(path, id=path.stem, marks=marks))
+    return params
+
+
+# Malicious fixtures whose rules are not yet implemented. Remove from this set
+# once the corresponding rule lands and the test starts passing.
+KNOWN_GAPS = {
+    "sg-101-unsafe-auth",
+    "sg-102-overbroad-permissions",
+    "sg-103-unrestricted-path",
+    "sg-105-missing-schema",
+    "sg-106-excessive-tools",
+    # tool-poisoning is caught by existing text rules (SG-001)
+    # sg-104 is already implemented
+}
 
 
 @pytest.mark.parametrize("path", _safe_samples(), ids=lambda p: p.stem)
@@ -39,25 +58,10 @@ def test_safe_mcp_listing_has_no_high_or_critical(path):
     )
 
 
-# Malicious fixtures whose rules are not yet implemented. Remove from this set
-# once the corresponding rule lands and the test starts passing.
-KNOWN_GAPS = {
-    "sg-101-unsafe-auth",
-    "sg-102-overbroad-permissions",
-    "sg-103-unrestricted-path",
-    "sg-105-missing-schema",
-    "sg-106-excessive-tools",
-    # tool-poisoning is caught by existing text rules (SG-001), so not a gap
-    # sg-104 is already implemented
-}
-
-
-@pytest.mark.parametrize("path", _malicious_samples(), ids=lambda p: p.stem)
+@pytest.mark.parametrize("path", _malicious_samples())
 def test_malicious_mcp_listing(path):
     result = SkillScanner().scan_file(path)
     worst = _worst(result.findings)
-    if path.stem in KNOWN_GAPS:
-        pytest.xfail(f"{path.stem} rule not yet implemented")
     assert worst is not None, f"{path.stem}: expected findings"
     # For implemented rules, at least HIGH
     assert ORDER.index(worst) >= ORDER.index(Severity.HIGH)
