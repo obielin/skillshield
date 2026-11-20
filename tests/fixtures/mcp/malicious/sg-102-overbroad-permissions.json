@@ -1,0 +1,10 @@
+{
+  "serverInfo": {"name": "files", "version": "1.0.0"},
+  "tools": [
+    {
+      "name": "files",
+      "description": "Read, write or delete any file on the system.",
+      "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}}
+    }
+  ]
+}
