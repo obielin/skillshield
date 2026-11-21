@@ -10,6 +10,8 @@ variables, so CI inputs never have to be pasted into a shell command:
                               critical, high, medium, low or none (default "high")
     SKILLSHIELD_MIN_SEVERITY  Ignore findings below this severity (default "info")
     SKILLSHIELD_SARIF_FILE    Write a SARIF 2.1.0 file here (optional)
+    SKILLSHIELD_IGNORE_FILE   Accept the findings listed in this file (default:
+                              .skillshield-ignore in the workspace, if there is one)
     SKILLSHIELD_WORKSPACE     Report paths relative to this directory
                               (default: GITHUB_WORKSPACE, or the current directory)
 
@@ -229,6 +231,7 @@ def summary_markdown(
         f"| Unreadable files | {len(errors)} |",
         f"| Missing paths | {len(missing)} |",
         f"| Unscanned files | {len(unscanned)} |",
+        f"| Accepted findings | {sum(len(r.accepted) for r in results)} |",
         "",
     ]
     if flagged:
@@ -356,6 +359,7 @@ def read_settings(env: dict[str, str]) -> dict:
         "min_severity": SEVERITIES[sev_raw],
         "sarif_file": env.get("SKILLSHIELD_SARIF_FILE", "").strip() or None,
         "workspace": Path(workspace),
+        "ignore_file": env.get("SKILLSHIELD_IGNORE_FILE", "").strip() or None,
     }
 
 
@@ -367,7 +371,27 @@ def run(env: dict[str, str]) -> int:
         print(f"::error::SkillShield: {e}")
         return 2
 
+    from skillshield.ignore import IgnoreFileError, find_default, load
+
+    ignore_path = s["ignore_file"]
+    if ignore_path and not Path(ignore_path).is_absolute():
+        ignore_path = s["workspace"] / ignore_path
+    ignore_path = ignore_path or find_default(s["workspace"])
+    try:
+        ignore = load(ignore_path) if ignore_path else None
+    except IgnoreFileError as e:
+        print(f"::error::SkillShield: {e}")
+        return 2
+
     results, missing, skipped = _scan_paths(s["paths"], s["workspace"], s["min_severity"])
+    if ignore is not None:
+        for r in results:
+            ignore.apply(r, s["workspace"] / r.skill_name)
+        for entry in ignore.stale_entries():
+            print(
+                f"::warning file={_display_path(ignore.path, s['workspace'])},line={entry.line}"
+                f"::This entry accepted nothing in this scan; remove it if it is no longer needed."
+            )
     exit_code = decide(results, missing, s["fail_on"])
 
     if s["sarif_file"]:
@@ -375,6 +399,9 @@ def run(env: dict[str, str]) -> int:
         _write(s["sarif_file"], json.dumps(report_to_sarif(report), indent=2))
 
     print(console_report(results, missing, exit_code, skipped, s["sarif_file"]))
+    accepted = sum(len(r.accepted) for r in results)
+    if accepted:
+        print(f"{accepted} finding(s) accepted in {ignore.path.name}.")
     _write(
         env.get("GITHUB_STEP_SUMMARY"),
         summary_markdown(results, missing, s["fail_on"], exit_code, skipped, s["workspace"]),
@@ -387,6 +414,7 @@ def run(env: dict[str, str]) -> int:
         "scanned": str(len(results)),
         "flagged": str(flagged),
         "findings": str(sum(len(r.findings) for r in results)),
+        "accepted": str(sum(len(r.accepted) for r in results)),
         "sarif-file": s["sarif_file"] or "",
         "exit-code": str(exit_code),
     }
