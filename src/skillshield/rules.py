@@ -2199,6 +2199,70 @@ RULE_SUSPICIOUS_TOOL_NAME = Rule(
 )
 
 
+# ── SG-103: Unrestricted Path Parameter ────────────────────────
+
+
+def _check_unrestricted_paths(listing: ToolListing) -> list[tuple[McpTool, str]]:
+    matches = []
+    for tool in listing.tools:
+        if not set(_tool_name_words(tool.name)).intersection(
+            {
+                "file",
+                "files",
+                "read",
+                "write",
+                "open",
+                "path",
+                "paths",
+                "fs",
+                "dir",
+                "dirs",
+                "directory",
+                "directories",
+                "folder",
+                "folders",
+            }
+        ):
+            continue
+        properties = (tool.input_schema or {}).get("properties")
+        if not isinstance(properties, dict):
+            continue
+        for name, schema in properties.items():
+            if "path" not in name.lower():
+                continue
+            if isinstance(schema, dict):
+                if "enum" in schema:
+                    continue
+                restriction = schema.get("items") if schema.get("type") == "array" else schema
+                if isinstance(restriction, dict) and (
+                    "pattern" in restriction or "enum" in restriction
+                ):
+                    continue
+            snippet = (
+                f"Tool '{tool.name}': path parameter '{name}' has no pattern or enum restriction"
+            )
+            matches.append((tool, _escape_control_characters(snippet)))
+    return matches
+
+
+RULE_UNRESTRICTED_PATH = Rule(
+    id="SG-103",
+    name="Unrestricted Path Parameter",
+    severity=Severity.HIGH,
+    description=(
+        "A filesystem tool accepts a path without a pattern or enum restriction. "
+        "An agent may be steered outside the intended directory. "
+        "Ported from mcpscan MR-004; relates to OWASP ASI02 Tool Misuse."
+    ),
+    remediation=(
+        "Constrain each path parameter with a pattern or enum and enforce the allowed "
+        "directory on the server, including after resolving symlinks."
+    ),
+    listing_fn=_check_unrestricted_paths,
+    tags=["mcp", "path-traversal", "owasp-asi02", "owasp-ast01"],
+)
+
+
 # ── All rules ──────────────────────────────────────────────────
 
 ALL_RULES: list[Rule] = [
@@ -2217,5 +2281,6 @@ ALL_RULES: list[Rule] = [
     RULE_PACKAGE_REGISTRY,
     RULE_BRAND_NAME_IMPERSONATION,
     RULE_COMPILED_PYTHON,
+    RULE_UNRESTRICTED_PATH,
     RULE_SUSPICIOUS_TOOL_NAME,
 ]
