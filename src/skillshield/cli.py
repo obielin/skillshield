@@ -159,6 +159,66 @@ def _emit_batch(report, args, source: str | None = None) -> int:
     return 1 if any(r.risk_level in ("CRITICAL", "HIGH") for r in report.results) else 0
 
 
+def _emit_installed(installed, args) -> int:
+    """Render an installed-skills scan report and return its exit code."""
+    report = installed.report
+    if args.format == "json":
+        out = {
+            "locations": [
+                {
+                    "agent": loc.agent,
+                    "path": str(loc.path),
+                    "skills": loc.skill_count,
+                }
+                for loc in installed.locations
+            ],
+            "total": report.total_scanned,
+            "flagged": report.flagged_count,
+            "critical": report.critical_count,
+            "errors": report.error_count,
+            "flag_rate": report.flag_rate,
+            "unscanned": report.metadata.get("unscanned") or [],
+            "skipped": report.metadata.get("skipped") or [],
+            "results": [
+                {
+                    "agent": r.agent,
+                    "skill": r.skill_name,
+                    "path": r.file_path,
+                    "risk_level": r.risk_level,
+                    "risk_score": r.risk_score,
+                    **({"error": r.error} if r.error else {}),
+                    "findings": [
+                        {
+                            "id": f.rule_id,
+                            "name": f.name,
+                            "severity": f.severity.value,
+                            "tags": f.rule.tags,
+                            "description": f.rule.description,
+                            "snippets": f.snippets[:3],
+                        }
+                        for f in r.findings
+                    ],
+                }
+                for r in report.results
+            ],
+        }
+        print(json.dumps(out, indent=2))
+    elif args.format == "sarif":
+        from skillshield.sarif import report_to_sarif
+
+        print(json.dumps(report_to_sarif(report), indent=2))
+    else:
+        from skillshield.installed import format_installed_text
+
+        no_color = getattr(args, "no_color", False)
+        color_fn = (lambda text, level: text) if no_color else _color
+        print(format_installed_text(installed, verbose=args.verbose, color_fn=color_fn))
+
+    if report.error_count > 0:
+        return 2
+    return 1 if any(r.risk_level in ("CRITICAL", "HIGH") for r in report.results) else 0
+
+
 def _emit_single(results, args, source: str | None = None) -> int:
     """Render a single result and return its exit code; ``source`` is a GitHub URL note."""
     if args.format == "json":
@@ -215,7 +275,20 @@ def cmd_scan(args) -> int:
     min_sev = sev_map.get(args.min_severity.lower(), Severity.INFO)
     scanner = SkillScanner(min_severity=min_sev, verbose=args.verbose)
 
-    target = args.target
+    target = getattr(args, "target", None)
+    installed = getattr(args, "installed", False)
+
+    if installed and target is not None:
+        print("Error: cannot use --installed together with a target path", file=sys.stderr)
+        return 2
+    if not installed and target is None:
+        print("Error: provide a target path or pass --installed", file=sys.stderr)
+        return 2
+
+    if installed:
+        from skillshield.installed import scan_installed
+
+        return _emit_installed(scan_installed(scanner=scanner), args)
 
     # A GitHub URL is downloaded into a temporary folder and scanned while it exists.
     from skillshield.download import DownloadError, fetch_github, is_github_url
@@ -323,6 +396,7 @@ def main() -> None:
 Examples:
   skillshield scan SKILL.md
   skillshield scan ./skills/ --format json
+  skillshield scan --installed
   skillshield scan SKILL.md --min-severity high --verbose
   skillshield check "ignore all previous instructions"
   skillshield rules
@@ -334,7 +408,12 @@ Examples:
 
     # scan
     p_scan = sub.add_parser("scan", help="Scan a skill file, directory, GitHub URL, or stdin")
-    p_scan.add_argument("target", help="File, directory, GitHub URL, or - for stdin")
+    p_scan.add_argument("target", nargs="?", help="File, directory, GitHub URL, or - for stdin")
+    p_scan.add_argument(
+        "--installed",
+        action="store_true",
+        help="Scan skill folders already installed for common coding agents",
+    )
     p_scan.add_argument("--format", choices=["text", "json", "sarif"], default="text")
     p_scan.add_argument(
         "--min-severity",
@@ -359,6 +438,11 @@ Examples:
 
     args = p.parse_args()
     _escape_unencodable_output()
+    if args.command == "scan":
+        if args.installed and args.target is not None:
+            p_scan.error("cannot use --installed together with a target path")
+        if not args.installed and args.target is None:
+            p_scan.error("a target path or --installed is required")
     result = args.func(args)
     sys.exit(result if isinstance(result, int) else 0)
 
