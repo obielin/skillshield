@@ -121,8 +121,8 @@ Comment `/assign` on an open issue and it is assigned to you straight away. No n
 
 How it stays fair:
 
-- **`good first issue` is for newcomers.** You can claim one if you haven't had a pull request merged here yet, one at a time. After your first merged PR, the [`help wanted`](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) issues are yours.
-- **Up to three open claims at once** for everyone.
+- **Anyone can claim any issue**, whether it's your first contribution or your tenth. `good first issue` marks issues that are a good place to start; it isn't reserved for newcomers.
+- **Up to two open claims at once** for everyone, so issues keep moving and there's always something left for others.
 - **Claims free up on their own.** After 10 days with no activity from you, you get a friendly reminder; after 14 days, the issue is released for someone else. Any comment from you counts as activity, `/extend` resets the clock, and an open pull request that mentions the issue pauses it.
 - **Tracking issues** (labelled `roadmap`) are not claimed themselves: claim one of the issues they list.
 

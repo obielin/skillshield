@@ -72,7 +72,7 @@ test("parseCommand reads only a command at the start of the first line", () => {
   assert.equal(claims.parseCommand(""), null);
 });
 
-test("a newcomer can claim a good first issue", async () => {
+test("anyone can claim a good first issue", async () => {
   const { github, calls } = fakeGithub({ issue: { labels: [label("good first issue")] } });
   assert.equal(await claims.handleComment({ github, context: ctx({ body: "/assign" }) }), "assigned");
   assert.deepEqual(calls.added, ["newbie"]);
@@ -88,29 +88,32 @@ test("the decision uses the issue as it is now, not the comment's snapshot", asy
   assert.match(calls.comments[0].body, /@someone/);
 });
 
-test("someone with a merged PR cannot take a good first issue", async () => {
-  const { github, calls } = fakeGithub({ issue: { labels: [label("good first issue")] }, merged: { newbie: 1 } });
-  assert.equal(await claims.handleComment({ github, context: ctx({ body: "/assign" }) }), "not-first-timer");
-  assert.deepEqual(calls.added, []);
-  assert.match(calls.comments[0].body, /help wanted/);
+test("a returning contributor can claim a good first issue", async () => {
+  const { github, calls } = fakeGithub({ issue: { labels: [label("good first issue")] }, merged: { newbie: 3 } });
+  assert.equal(await claims.handleComment({ github, context: ctx({ body: "/assign" }) }), "assigned");
+  assert.deepEqual(calls.added, ["newbie"]);
 });
 
-test("a newcomer holds one good first issue at a time", async () => {
+test("a second good first issue is fine, within the two-claim limit", async () => {
   const { github, calls } = fakeGithub({
     issue: { labels: [label("good first issue")] },
     claimsOf: { newbie: [{ number: 12, labels: [label("good first issue")] }] },
   });
-  assert.equal(await claims.handleComment({ github, context: ctx({ body: "/assign" }) }), "one-first-timer-issue");
-  assert.deepEqual(calls.added, []);
+  assert.equal(await claims.handleComment({ github, context: ctx({ body: "/assign" }) }), "assigned");
+  assert.deepEqual(calls.added, ["newbie"]);
 });
 
-test("anyone can claim a help wanted issue, up to three open claims", async () => {
-  const two = [{ number: 1, labels: [] }, { number: 2, labels: [] }];
-  const ok = fakeGithub({ issue: { labels: [label("help wanted")] }, merged: { newbie: 5 }, claimsOf: { newbie: [...two] } });
+test("anyone can hold up to two open claims at once", async () => {
+  const one = [{ number: 1, labels: [] }];
+  const ok = fakeGithub({ issue: { labels: [label("help wanted")] }, merged: { newbie: 5 }, claimsOf: { newbie: [...one] } });
   assert.equal(await claims.handleComment({ github: ok.github, context: ctx({ body: "/assign" }) }), "assigned");
-  const full = fakeGithub({ issue: { labels: [label("help wanted")] }, claimsOf: { newbie: [...two, { number: 3, labels: [] }] } });
+  const full = fakeGithub({
+    issue: { labels: [label("good first issue")] },
+    claimsOf: { newbie: [...one, { number: 2, labels: [label("good first issue")] }] },
+  });
   assert.equal(await claims.handleComment({ github: full.github, context: ctx({ body: "/assign" }) }), "too-many");
   assert.deepEqual(full.calls.added, []);
+  assert.match(full.calls.comments[0].body, /2 open issues/);
 });
 
 test("if another claim lands first at the same time, ours is undone", async () => {
@@ -152,9 +155,8 @@ test("in a same-second tie, the run for the later login undoes its claim", async
 });
 
 test("claims made on two issues at once cannot exceed the limit", async () => {
-  const two = [{ number: 1, labels: [] }, { number: 2, labels: [] }];
   const { github, calls } = fakeGithub({
-    claimsOf: { newbie: [...two] },
+    claimsOf: { newbie: [{ number: 1, labels: [] }] },
     afterAssign: ({ claimsOf }) => claimsOf.newbie.push({ number: 31, labels: [] }), // a parallel /assign on #31
   });
   assert.equal(await claims.handleComment({ github, context: ctx({ body: "/assign" }) }), "too-many");

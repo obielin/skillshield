@@ -18,6 +18,19 @@ import sys
 from pathlib import Path
 
 from skillshield import __version__
+from skillshield.scanner import decode_text
+
+
+def _read_stdin() -> str:
+    """Read stdin as UTF-8 bytes, the way a file is read.
+
+    sys.stdin decodes with the locale encoding. On Windows that is a legacy code page, so
+    UTF-8 text piped in was garbled before the rules saw it, or raised UnicodeDecodeError.
+    """
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:  # a text stream with no bytes under it, such as io.StringIO
+        return sys.stdin.read()
+    return decode_text(buffer.read())
 
 
 def _color(text: str, level: str) -> str:
@@ -303,8 +316,7 @@ def cmd_scan(args) -> int:
 
     # stdin
     if target == "-":
-        text = sys.stdin.read()
-        result = scanner.scan_text(text, name="<stdin>")
+        result = scanner.scan_text(_read_stdin(), name="<stdin>")
         results = [result]
 
     # directory
@@ -363,6 +375,18 @@ def cmd_rules(args) -> None:
     print()
 
 
+def _escape_unencodable_output() -> None:
+    """Write a character stdout cannot encode as a ``\\uXXXX`` escape instead of raising.
+
+    A redirected stdout uses the locale encoding. On Windows that is a legacy code page,
+    so a file name or matched snippet outside it stopped the report with
+    UnicodeEncodeError, and the traceback's exit code 1 read as a CRITICAL or HIGH result.
+    """
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(errors="backslashreplace")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="skillshield",
@@ -413,6 +437,7 @@ Examples:
     p_rules.set_defaults(func=cmd_rules)
 
     args = p.parse_args()
+    _escape_unencodable_output()
     if args.command == "scan":
         if args.installed and args.target is not None:
             p_scan.error("cannot use --installed together with a target path")

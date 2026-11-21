@@ -36,7 +36,6 @@ Everyone starts here.
 Earned with your first merged pull request.
 
 - Credited in [CHANGELOG.md](CHANGELOG.md) for the release that ships your work.
-- No longer eligible for `good first issue`, so it stays open for newcomers. `help wanted` is yours.
 
 ### Regular contributor
 
