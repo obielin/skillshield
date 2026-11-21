@@ -84,6 +84,7 @@ skillshield scan - < SKILL.md              # scan stdin
 skillshield check "some text to scan"      # scan text given on the command line
 skillshield accept docs/ --reason "..."    # accept the findings in docs/ after review
 skillshield rules                          # list all rules
+skillshield lock ./skills/                 # record a hash of every file in each skill
 skillshield --version
 ```
 
@@ -102,6 +103,8 @@ Options for `skillshield scan`:
 `skillshield check` uses all rules and always shows matched snippets.
 
 Set `NO_COLOR` to any non-empty value, or pass `--no-color` to `scan` or `check`, to disable coloured terminal output. Redirected output stays plain; an empty `NO_COLOR` value leaves terminal colours enabled.
+
+`skillshield lock` writes `skillshield.lock` (or the path given with `--output`): a SHA-256 hash of every file in each skill, and the risk level each skill had when it was locked. A skill is a directory with a `SKILL.md`. Directories skipped during scanning are left out, except compiled Python, and symbolic links are recorded by their target without being followed. The file has sorted keys and paths relative to itself, so locking the same skills again gives the same bytes and the file diffs cleanly in git.
 
 `skillshield rules --format json` lists every rule's `id`, `name`, `severity`, `tags`, `description` and `remediation` as a JSON array. `--format text` preserves the default rules listing.
 
@@ -246,6 +249,7 @@ This text has prompt injection and a URL but no file system access, so SG-011 do
 | `skillshield scan` on a directory | at least one file is CRITICAL or HIGH | the path does not exist, or any file cannot be read | 0 |
 | `skillshield scan --installed` | at least one file is CRITICAL or HIGH | any file or folder cannot be read (missing locations are skipped) | 0 |
 | `skillshield check` | there is at least one finding | | 0 |
+| `skillshield lock` | | the path does not exist, it holds no skills, or a file or directory in a skill cannot be read or scanned | 0 |
 
 A directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate (unreadable subfolders are not reported by plain directory scans, while `--installed` reports both unreadable files and unreadable folders).
 
