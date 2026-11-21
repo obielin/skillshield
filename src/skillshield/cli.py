@@ -33,6 +33,65 @@ def _read_stdin() -> str:
     return decode_text(buffer.read())
 
 
+def _accepted_json(result) -> list[dict]:
+    return [
+        {
+            "id": a.finding.rule_id,
+            "name": a.finding.name,
+            "severity": a.finding.severity.value,
+            "reason": a.reason,
+            "fingerprint": a.fingerprint,
+        }
+        for a in result.accepted
+    ]
+
+
+def _print_accepted(results, show: bool, ignore_name: str) -> None:
+    """Say how many findings were accepted, and with --show-accepted, which and why."""
+    accepted = [(r, a) for r in results for a in r.accepted]
+    if not accepted:
+        return
+    print(f"  {len(accepted)} finding(s) accepted ({ignore_name})")
+    if show:
+        for r, a in accepted:
+            print(f"    [{a.finding.rule_id}] {r.skill_name}: {a.reason} ({a.fingerprint})")
+    else:
+        print("  Run with --show-accepted to list them.")
+    print()
+
+
+def _load_ignore(args):
+    """The ignore file for this scan, None for no file, or an exit code on error."""
+    from skillshield.ignore import IgnoreFileError, find_default, load
+
+    if getattr(args, "no_ignore_file", False):
+        return None
+    path = getattr(args, "ignore_file", None)
+    if path is None:
+        path = find_default()
+        if path is None:
+            return None
+    try:
+        return load(path)
+    except IgnoreFileError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+
+def _warn_stale(ignore) -> None:
+    for entry in ignore.stale_entries():
+        sys.stderr.write(
+            f"Warning: {ignore.path.name} line {entry.line} ({entry.key} {entry.glob}) "
+            "accepted nothing in this scan; remove it if it is no longer needed.\n"
+        )
+
+
+def _is_github_url(target: str | None) -> bool:
+    from skillshield.download import is_github_url
+
+    return bool(target) and is_github_url(target)
+
+
 def _color(text: str, level: str) -> str:
     """ANSI colour codes for terminal output."""
     codes = {
@@ -136,6 +195,7 @@ def _emit_batch(report, args, source: str | None = None) -> int:
                         }
                         for f in r.findings
                     ],
+                    **({"accepted": _accepted_json(r)} if r.accepted else {}),
                 }
                 for r in report.results
             ],
@@ -154,6 +214,11 @@ def _emit_batch(report, args, source: str | None = None) -> int:
         if source:
             print(source)
         print(report.summary())
+        _print_accepted(
+            report.results,
+            getattr(args, "show_accepted", False),
+            getattr(args, "ignore_name", ".skillshield-ignore"),
+        )
     if report.error_count > 0:
         return 2
     return 1 if any(r.risk_level in ("CRITICAL", "HIGH") for r in report.results) else 0
@@ -240,6 +305,7 @@ def _emit_single(results, args, source: str | None = None) -> int:
                 }
                 for f in results[0].findings
             ],
+            **({"accepted": _accepted_json(results[0])} if results[0].accepted else {}),
         }
         if source:
             out["source"] = source
@@ -256,6 +322,11 @@ def _emit_single(results, args, source: str | None = None) -> int:
             print(source)
         for result in results:
             _print_result(result, verbose=args.verbose, no_color=getattr(args, "no_color", False))
+        _print_accepted(
+            results,
+            getattr(args, "show_accepted", False),
+            getattr(args, "ignore_name", ".skillshield-ignore"),
+        )
     if results[0].risk_level == "ERROR":
         return 2
     return 1 if results[0].risk_level in ("CRITICAL", "HIGH") else 0
@@ -284,6 +355,14 @@ def cmd_scan(args) -> int:
     if not installed and target is None:
         print("Error: provide a target path or pass --installed", file=sys.stderr)
         return 2
+
+    if getattr(args, "ignore_file", None) and (
+        installed or target == "-" or _is_github_url(target)
+    ):
+        sys.stderr.write(
+            "Note: an ignore file only applies to scans of a local file or folder; "
+            "it was not used.\n"
+        )
 
     if installed:
         from skillshield.installed import scan_installed
@@ -321,12 +400,32 @@ def cmd_scan(args) -> int:
 
     # directory
     elif Path(target).is_dir():
-        return _emit_batch(scanner.scan_directory(target), args)
+        ignore = _load_ignore(args)
+        if isinstance(ignore, int):
+            return ignore
+        report = scanner.scan_directory(target)
+        if ignore is not None:
+            for r in report.results:
+                ignore.apply(r, Path(target) / r.skill_name)
+            args.ignore_name = ignore.path.name
+        code = _emit_batch(report, args)
+        if ignore is not None:
+            _warn_stale(ignore)
+        return code
 
     # single file
     elif Path(target).is_file():
+        ignore = _load_ignore(args)
+        if isinstance(ignore, int):
+            return ignore
         result = scanner.scan_file(target)
         results = [result]
+        if ignore is not None:
+            ignore.apply(result, Path(target))
+            args.ignore_name = ignore.path.name
+            code = _emit_single(results, args)
+            _warn_stale(ignore)
+            return code
 
     else:
         print(f"Error: {target} not found")
@@ -334,6 +433,57 @@ def cmd_scan(args) -> int:
 
     # Output single result
     return _emit_single(results, args)
+
+
+def cmd_accept(args) -> int:
+    """Accept every current finding in a file or folder by its fingerprint."""
+    from skillshield import SkillScanner
+    from skillshield.ignore import (
+        IGNORE_FILE_NAME,
+        IgnoreFile,
+        IgnoreFileError,
+        accept_lines,
+        load,
+    )
+
+    reason = " ".join(args.reason.split())
+    if not reason:
+        print("Error: --reason must say why these findings are accepted", file=sys.stderr)
+        return 2
+    path = Path(args.ignore_file or IGNORE_FILE_NAME)
+    try:
+        ignore = load(path) if path.exists() else IgnoreFile(path=path, entries=[])
+    except IgnoreFileError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    target = Path(args.target)
+    scanner = SkillScanner()
+    if target.is_dir():
+        pairs = [(r, target / r.skill_name) for r in scanner.scan_directory(target).results]
+    elif target.is_file():
+        pairs = [(scanner.scan_file(target), target)]
+    else:
+        print(f"Error: {target} not found", file=sys.stderr)
+        return 2
+    for result, file in pairs:
+        ignore.apply(result, file)
+    lines = accept_lines(pairs, ignore, reason)
+    if not lines:
+        print(f"Nothing to accept: no findings outside {path}.")
+        return 0
+    new_file = not path.exists()
+    with path.open("a", encoding="utf-8") as fh:
+        if new_file:
+            fh.write(
+                "# Findings accepted after review. Each line needs a reason.\n"
+                "# Format: <rule ID or fingerprint>  <path glob, or ->  <reason>\n"
+            )
+        elif path.stat().st_size and not path.read_bytes().endswith(b"\n"):
+            fh.write("\n")
+        fh.write("\n".join(lines) + "\n")
+    print(f"Accepted {len(lines) // 2} finding(s) in {path}.")
+    return 0
 
 
 def cmd_check(args) -> int:
@@ -398,6 +548,7 @@ Examples:
   skillshield scan ./skills/ --format json
   skillshield scan --installed
   skillshield scan SKILL.md --min-severity high --verbose
+  skillshield accept docs/ --reason "Attack phrases quoted as examples"
   skillshield check "ignore all previous instructions"
   skillshield rules
   cat SKILL.md | skillshield scan -
@@ -423,7 +574,33 @@ Examples:
     )
     p_scan.add_argument("--verbose", "-v", action="store_true", help="Show matched snippets")
     p_scan.add_argument("--no-color", action="store_true", help="Disable coloured output")
+    p_scan.add_argument(
+        "--ignore-file",
+        metavar="PATH",
+        help="Accept the findings listed in this file "
+        "(default: .skillshield-ignore in the current folder, if there is one)",
+    )
+    p_scan.add_argument("--no-ignore-file", action="store_true", help="Do not read any ignore file")
+    p_scan.add_argument(
+        "--show-accepted",
+        action="store_true",
+        help="List the accepted findings and the reason for each",
+    )
     p_scan.set_defaults(func=cmd_scan)
+
+    # accept
+    p_accept = sub.add_parser(
+        "accept",
+        help="Accept every current finding in a file or folder, with a reason",
+    )
+    p_accept.add_argument("target", help="File or directory whose findings were reviewed")
+    p_accept.add_argument("--reason", required=True, help="Why these findings are accepted")
+    p_accept.add_argument(
+        "--ignore-file",
+        metavar="PATH",
+        help="The ignore file to add to (default: .skillshield-ignore in the current folder)",
+    )
+    p_accept.set_defaults(func=cmd_accept)
 
     # check
     p_check = sub.add_parser("check", help="Scan inline text")

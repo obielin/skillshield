@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Accept a reviewed finding with a reason in a `.skillshield-ignore` file: a rule ID and a path glob, or one finding's fingerprint, followed by a required reason. Accepted findings leave the risk score, level and exit code, but the report counts them, `scan --show-accepted` lists them, JSON lists them under `accepted`, and SARIF keeps them with a `suppressions` entry holding the reason. A rule entry cannot accept a CRITICAL finding; only its fingerprint can. A fingerprint is tied to the rule, file and matched text, so a moved line stays accepted and changed text comes back for review. `skillshield accept <path> --reason "..."` adds fingerprints for every current finding. The file is read from the current folder (or `--ignore-file`, or the Action's new `ignore-file` input), never from inside the folder being scanned, and an entry that accepted nothing prints a warning (#101).
 - SG-103 checks each filesystem path parameter for its own schema restriction (#137).
 - SG-106 reports servers exposing more than 50 MCP tools (#140).
 

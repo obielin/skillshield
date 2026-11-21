@@ -48,6 +48,8 @@ class SkillScanResult:
         error:         Any error encountered during scanning
         agent:         Agent name when scanning installed skills
         file_path:     Resolved file path when scanning installed skills
+        accepted:      Findings accepted in .skillshield-ignore, each with its reason.
+                       They are left out of findings, risk_score and risk_level.
     """
 
     skill_name: str
@@ -60,6 +62,7 @@ class SkillScanResult:
     error: str = ""
     agent: str = ""
     file_path: str = ""
+    accepted: list[Any] = field(default_factory=list)
 
     @property
     def is_safe(self) -> bool:
