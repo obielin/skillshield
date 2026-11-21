@@ -1597,10 +1597,6 @@ def _check_lethal_trifecta(text: str) -> list[str]:
 
     Each alone is medium risk. Together = critical supply chain attack.
     """
-    has_injection = bool(RULE_PROMPT_INJECTION.match(text))
-    has_network = bool(
-        re.search(r"(?:http[s]?://|requests?\.|urllib|socket\.|curl|wget)", text, re.IGNORECASE)
-    )
     has_fs = bool(
         re.search(
             r"(?:open\s*\(|os\.(?:listdir|walk|scandir|read)|pathlib\.Path|glob\.glob|shutil\.)",
@@ -1608,13 +1604,21 @@ def _check_lethal_trifecta(text: str) -> list[str]:
             re.IGNORECASE,
         )
     )
-    if has_injection and has_network and has_fs:
-        return [
-            "LETHAL TRIFECTA: Prompt injection + network access + file system access "
-            "detected together. This combination is the hallmark of ClawHavoc-style "
-            "supply chain attack skills."
-        ]
-    return []
+    if not has_fs:
+        return []
+    has_network = bool(
+        re.search(r"(?:http[s]?://|requests?\.|urllib|socket\.|curl|wget)", text, re.IGNORECASE)
+    )
+    if not has_network:
+        return []
+    has_injection = bool(RULE_PROMPT_INJECTION.match(text))
+    if not has_injection:
+        return []
+    return [
+        "LETHAL TRIFECTA: Prompt injection + network access + file system access "
+        "detected together. This combination is the hallmark of ClawHavoc-style "
+        "supply chain attack skills."
+    ]
 
 
 RULE_LETHAL_TRIFECTA = Rule(
