@@ -127,7 +127,10 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
                     "path": scan_result.file_path or scan_result.skill_name,
                 }
             notifications.append(notification)
-        for finding in scan_result.findings:
+        # Accepted findings stay in the log, marked as suppressed with their reason,
+        # so code scanning keeps a record of what was accepted and why.
+        accepted = [(a.finding, a) for a in scan_result.accepted]
+        for finding, acceptance in [(f, None) for f in scan_result.findings] + accepted:
             level = _SEVERITY_TO_LEVEL.get(finding.severity, "warning")
             message_text = (
                 f"{finding.name}: {finding.rule.description}"
@@ -163,6 +166,9 @@ def results_to_sarif(results: list[SkillScanResult]) -> dict[str, Any]:
             }
             if finding.rule_id in rule_id_to_index:
                 entry["ruleIndex"] = rule_id_to_index[finding.rule_id]
+            if acceptance is not None:
+                entry["suppressions"] = [{"kind": "external", "justification": acceptance.reason}]
+                entry["partialFingerprints"] = {"skillshield/v1": acceptance.fingerprint}
             if scan_result.agent:
                 entry["properties"] = {
                     "agent": scan_result.agent,

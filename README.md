@@ -82,6 +82,7 @@ skillshield scan ./skills/                 # scan a directory
 skillshield scan --installed               # scan skills already installed for local agents
 skillshield scan - < SKILL.md              # scan stdin
 skillshield check "some text to scan"      # scan text given on the command line
+skillshield accept docs/ --reason "..."    # accept the findings in docs/ after review
 skillshield rules                          # list all rules
 skillshield --version
 ```
@@ -94,12 +95,40 @@ Options for `skillshield scan`:
 | `--format` | `text`, `json`, `sarif` | `text` | Output format. |
 | `--min-severity` | `critical`, `high`, `medium`, `low`, `info` | `info` | Only report findings at this severity or above. |
 | `--verbose`, `-v` | | off | Show matched snippets in text output. It also prints `Scanning ...` progress lines to stderr, so JSON and SARIF output on stdout stay valid. |
+| `--ignore-file` | a path | none | Accept the findings listed in this file, such as `.skillshield-ignore`. See [Accepting a reviewed finding](#accepting-a-reviewed-finding). |
+| `--no-ignore-file` | | off | Do not read any ignore file. |
+| `--show-accepted` | | off | List each accepted finding with its reason. |
 
 `skillshield check` uses all rules and always shows matched snippets.
 
 Set `NO_COLOR` to any non-empty value, or pass `--no-color` to `scan` or `check`, to disable coloured terminal output. Redirected output stays plain; an empty `NO_COLOR` value leaves terminal colours enabled.
 
 `skillshield rules --format json` lists every rule's `id`, `name`, `severity`, `tags`, `description` and `remediation` as a JSON array. `--format text` preserves the default rules listing.
+
+### Accepting a reviewed finding
+
+Some findings are expected: documentation that quotes an attack as an example, or a package index your team runs. Once you have reviewed one, accept it in a `.skillshield-ignore` file at the root of your repository, with the reason, and pass it with `--ignore-file .skillshield-ignore`. Accepted findings no longer count towards the risk level or the exit code, but they are never hidden: the report says how many were accepted, `--show-accepted` lists them, and SARIF output keeps them marked as suppressed with the reason.
+
+```
+# rule or fingerprint    path glob         reason (required)
+SG-013                   setup/**          Our internal package mirror
+fp:3f9a1c0e7b2d4a55      -                 Reviewed 2026-11-21: installer pins a hash
+```
+
+- **First column:** a rule ID, or a finding's fingerprint (`fp:` and 16 hex characters).
+- **Second column:** a path glob relative to the ignore file, or `-` for any path. `*` matches within one folder and `**` across folders.
+- **The rest of the line:** the reason. A line without one is an error, and so is an unknown rule ID; the scan exits with code 2 and names the line.
+
+A rule entry accepts findings up to HIGH. A CRITICAL finding can only be accepted by its own fingerprint, so a broad entry can never hide a new critical finding.
+
+A fingerprint is tied to the rule, the file and the text that matched. Moving the text up or down the file keeps it accepted; changing the matched text brings the finding back for review. To accept every current finding in a folder by fingerprint:
+
+```bash
+skillshield accept docs/ --reason "Attack phrases quoted as examples, reviewed 21 Nov 2026"
+skillshield scan . --ignore-file .skillshield-ignore
+```
+
+On the command line, SkillShield only reads the file you name with `--ignore-file`. It never picks one up by itself, so a skill you downloaded cannot accept its own findings, even when you scan it from inside its own folder, and an ignore file is not used for GitHub URL scans or `--installed`. The GitHub Action and `python -m skillshield.ci` read `.skillshield-ignore` from the repository root by default, because the workflow that runs them belongs to the repository; any change to that file shows in the pull request that makes it. An entry that accepted nothing in a scan prints a warning, so old entries get cleaned up.
 
 ### Check a skill before you install it
 
@@ -712,13 +741,15 @@ With the default `fail-on: high`, the step fails when any file is HIGH or CRITIC
 | `fail-on` | `high` | Fail at this level or above: `critical`, `high`, `medium`, `low` or `none`. |
 | `min-severity` | `info` | Ignore findings below this severity. |
 | `sarif-file` | a temporary file | Where to write the SARIF report. |
+| `ignore-file` | `.skillshield-ignore` in the repository root, if there is one | Findings accepted after review, each with a reason. See [Accepting a reviewed finding](#accepting-a-reviewed-finding). |
 
 | Output | What it holds |
 |---|---|
 | `risk-level` | The highest level found: `SAFE`, `LOW`, `MEDIUM`, `HIGH` or `CRITICAL`. |
 | `scanned` | The number of files scanned. |
 | `flagged` | The number of files with at least one finding. |
-| `findings` | The total number of findings. |
+| `findings` | The total number of findings, not counting accepted ones. |
+| `accepted` | The number of findings accepted in the ignore file. |
 | `sarif-file` | The path of the SARIF report. |
 
 The step exits with an error, whatever `fail-on` is set to, when a path does not exist or a file cannot be read. The action runs on Linux, macOS and Windows runners, and needs Python 3.10 or later, which GitHub-hosted runners already have.
@@ -756,7 +787,7 @@ pip install skillshield
 SKILLSHIELD_PATHS=skills SKILLSHIELD_SARIF_FILE=skillshield.sarif python -m skillshield.ci
 ```
 
-It takes the settings above as environment variables (`SKILLSHIELD_PATHS`, `SKILLSHIELD_FAIL_ON`, `SKILLSHIELD_MIN_SEVERITY`, `SKILLSHIELD_SARIF_FILE`) and uses the same exit codes: 0 pass, 1 fail, 2 a missing path, an unreadable file or an invalid setting.
+It takes the settings above as environment variables (`SKILLSHIELD_PATHS`, `SKILLSHIELD_FAIL_ON`, `SKILLSHIELD_MIN_SEVERITY`, `SKILLSHIELD_SARIF_FILE`, `SKILLSHIELD_IGNORE_FILE`) and uses the same exit codes: 0 pass, 1 fail, 2 a missing path, an unreadable file, an invalid setting or an invalid ignore file.
 
 ---
 
