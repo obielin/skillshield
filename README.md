@@ -8,7 +8,7 @@ SkillShield is a first line of defence, not a complete one: see [Limitations](#l
 
 **Contributors welcome.** Pick an issue and comment `/assign` to claim it: [good first issues](https://github.com/obielin/skillshield/contribute) · [help wanted](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) · [detection gaps](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3Adetection-gap) · [roadmap](ROADMAP.md)
 
-[![Tests](https://img.shields.io/badge/Tests-291%20passing-brightgreen?style=flat-square)](tests/)
+[![CI](https://github.com/obielin/skillshield/actions/workflows/ci.yml/badge.svg)](https://github.com/obielin/skillshield/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/skillshield?style=flat-square)](https://pypi.org/project/skillshield/)
 [![Dependencies](https://img.shields.io/badge/Dependencies-zero-brightgreen?style=flat-square)](pyproject.toml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square)](pyproject.toml)
@@ -81,7 +81,7 @@ skillshield scan SKILL.md                  # scan one file
 skillshield scan ./skills/                 # scan a directory
 skillshield scan - < SKILL.md              # scan stdin
 skillshield check "some text to scan"      # scan text given on the command line
-skillshield rules                          # list the 15 rules
+skillshield rules                          # list all rules
 skillshield --version
 ```
 
@@ -363,7 +363,7 @@ and never calls a tool: the scan works offline and sends nothing.
 
 | Rule | Severity | Name | What it looks for |
 |---|---|---|---|
-| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode", and the same overrides in Chinese, Japanese and Korean. |
+| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode", and the same overrides in Chinese, Japanese, Korean and Arabic. |
 | SG-002 | CRITICAL | Data Exfiltration | Sending files, secrets, keys or tokens out. Webhook calls, reads of `/etc/passwd` or `.env`, `socket` calls, and `subprocess` calls to `curl`, `wget` or `nc`. |
 | SG-003 | CRITICAL | Privilege Escalation | `sudo` with `rm`, `chmod` or a shell, `chmod 777`, `os.system`, `shell=True`, `eval` or `exec` on input, and turning off SELinux, AppArmor, UAC, Gatekeeper or SIP. |
 | SG-004 | HIGH | Identity Hijacking | Instructions to pose as a human or hide that the agent is an AI. |
@@ -378,9 +378,10 @@ and never calls a tool: the scan works offline and sends nothing.
 | SG-013 | HIGH | Untrusted Package Registry | `pip`, `npm` or `yarn` pointed at a registry other than the official one -- `--index-url`, `--extra-index-url`, `-i`, `--registry`, `PIP_INDEX_URL`, `npm config set registry`, `yarn config set npmRegistryServer`, or a `pip.conf`, `.npmrc` or `.pypirc` line that sets an untrusted registry (`registry`, `@scope:registry`, `index-url`, `repository`). TestPyPI counts as untrusted: anyone can publish there. A later install then pulls the attacker's packages (dependency confusion, OWASP AST02). |
 | SG-014 | HIGH | Compiled Python Payload | A `.pyc` or `.pyo` file in a skill folder. Bytecode cannot be reviewed, and Python imports or runs it directly, so a payload can hide behind a harmless-looking skill that claims to call a `.py` script. If the matching `.py` source is missing, the finding names that source file (its file name, not its full path) and asks you to ship the source instead. |
 | SG-015 | MEDIUM | Well-known Skill Name Impersonation | Frontmatter names that closely resemble canonical skill names or add suspicious suffixes such as `1` or `-pro`. |
+| SG-103 | HIGH | Unrestricted Path Parameter | Each filesystem path parameter needs its own `pattern` or `enum` (including array `items`); a restriction on another field does not hide it. |
 | SG-104 | HIGH | Suspicious Tool Name | An MCP tool in a saved listing whose name suggests harmful behaviour, such as `harvest_credentials`, `exfiltrate_data`, `steal_cookies`, `leak_secrets`, `bypass_auth`, `intercept_requests`, `sniff_traffic`, `dump_credentials` or `upload_all_files`. Words are matched whole, so `stealth_mode_toggle` and `dump_truck_lookup` are not flagged. |
 
-That is 5 CRITICAL rules, 9 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
+That is 5 CRITICAL rules, 10 HIGH rules and 2 MEDIUM rules. Run `skillshield rules` to see each rule with its tags.
 
 In a saved MCP listing, the rules above read the file as it is saved, so a plain instruction
 in a tool's description is caught by SG-001 in the same way as in a skill. Text hidden behind
@@ -392,7 +393,7 @@ They are planned, and each one is added to this table as it lands:
 |---|---|---|---|
 | SG-101 | #135 | Unsafe server authentication | planned |
 | SG-102 | #136 | Over-broad tool permissions | planned |
-| SG-103 | #137 | Unrestricted path parameter | planned |
+| SG-103 | #137 | Unrestricted path parameter | implemented |
 | SG-105 | #139 | Tool with no description or input schema | planned |
 | SG-106 | #140 | Excessive tool count | planned |
 
@@ -430,6 +431,7 @@ Each rule carries tags such as `owasp-asi01` and `owasp-ast01`. They appear in `
 | SG-013 | Untrusted Package Registry | ASI04 Agentic Supply Chain Vulnerabilities | AST02 Supply Chain Compromise |
 | SG-014 | Compiled Python Payload | ASI04 Agentic Supply Chain Vulnerabilities | AST01 Malicious Skills; AST08 Poor Scanning |
 | SG-015 | Well-known Skill Name Impersonation | ASI04 Agentic Supply Chain Vulnerabilities | AST04 Insecure Metadata |
+| SG-103 | Unrestricted Path Parameter | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
 | SG-104 | Suspicious Tool Name | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
 
 AST08 (Poor Scanning) is the risk that a scanner misses what is hidden in a skill. SG-008, SG-009 and SG-014 flag the hiding techniques themselves: encoded text, invisible channels and compiled code that cannot be read.
@@ -485,7 +487,7 @@ The level is also never lower than the worst single finding: one HIGH finding is
 SkillShield matches known patterns. It is a first line of defence, not a guarantee:
 
 - **Reworded attacks can get through.** A rule that catches "ignore all previous instructions" may miss the same instruction said another way.
-- **Only English, Chinese, Japanese and Korean phrasing is matched.** The same instruction in French, Spanish or another language is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
+- **Only English, Chinese, Japanese, Korean and Arabic phrasing is matched.** The same instruction in French, Spanish or another language is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
 - **Hidden characters are not yet removed before matching.** Zero-width characters inside a word, or lookalike letters from other alphabets, can stop a rule from matching.
 - **Some techniques have no rule yet**, such as piping a downloaded script into a shell, leaking data through a markdown image URL, or an instruction that waits for a trigger word.
 - **Documentation about attacks can be flagged.** A guide that quotes an attack phrase as an example may be reported as if it were an attack.

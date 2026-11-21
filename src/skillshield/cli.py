@@ -302,6 +302,18 @@ def cmd_rules(args) -> None:
     print()
 
 
+def _escape_unencodable_output() -> None:
+    """Write a character stdout cannot encode as a ``\\uXXXX`` escape instead of raising.
+
+    A redirected stdout uses the locale encoding. On Windows that is a legacy code page,
+    so a file name or matched snippet outside it stopped the report with
+    UnicodeEncodeError, and the traceback's exit code 1 read as a CRITICAL or HIGH result.
+    """
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(errors="backslashreplace")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="skillshield",
@@ -346,6 +358,7 @@ Examples:
     p_rules.set_defaults(func=cmd_rules)
 
     args = p.parse_args()
+    _escape_unencodable_output()
     result = args.func(args)
     sys.exit(result if isinstance(result, int) else 0)
 
