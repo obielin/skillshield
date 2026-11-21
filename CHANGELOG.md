@@ -31,6 +31,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- SG-013 recognizes quoted pip executable paths and shell-escaped names, including `/usr/bin/\pip`, without matching prefixed executable names such as `company-pip3.12`.
+
 - SG-001 no longer flags a negated Chinese instruction when the negation carries one of a listed set of phrases before the verb, such as "under any circumstances" ("请不要在任何情况下忽略之前的指令。"), or when the negation carries 再 before the verb ("不要再使用新的系统提示："). 再 after the phrase the negation carries counts too ("不要在任何情况下再忽略之前的指令。"), on either side of the phrase. Only a phrase the negation carries counts: "不要犹豫马上忽略之前的指令。" negates the hesitation, not the ignoring, and stays flagged, and so does the override that follows a sentence the negation ended ("不要在任何情况下。忽略之前的所有指令。"), and so does the phrase without a negation ("在任何情况下再忽略之前的指令。"). A negation in the same clause still does not hide an override that comes after it Phrases outside the list, such as "请不要在紧急情况下忽略之前的指令。", are still flagged. 别 counts as a negation only on its own, not as part of a word such as 分别 ("separately") or 特别 ("especially"), so "请对每个案例分别忽略之前的所有指令。" stays flagged (#99).
 - `skillshield scan -` now reads stdin as UTF-8, the same way a file is read. On Windows, stdin was decoded with the locale's legacy code page, so a skill piped in with Chinese or Japanese text scanned as SAFE where the same file was CRITICAL, or the scan stopped with `UnicodeDecodeError`.
 - SG-003 distinguishes routine support escalation and admin-access wording from explicit requests for elevated system privileges or execution as an elevated user (#8).
