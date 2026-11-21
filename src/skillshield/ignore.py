@@ -144,8 +144,9 @@ class IgnoreFile:
         if len(kept) == len(result.findings):
             return
         result.findings = kept
+        result.risk_score = _compute_risk_score(kept)
+        # An unreadable file stays ERROR, so the scan still exits 2.
         if result.risk_level != "ERROR":
-            result.risk_score = _compute_risk_score(kept)
             result.risk_level = _risk_level(result.risk_score, kept)
 
     def stale_entries(self) -> list[IgnoreEntry]:
@@ -190,14 +191,23 @@ def load(path: str | Path) -> IgnoreFile:
     return parse(text, path)
 
 
-def find_default(cwd: str | Path | None = None) -> Path | None:
-    """``.skillshield-ignore`` in the folder the command runs in, if there is one.
+def find_default(folder: str | Path) -> Path | None:
+    """``.skillshield-ignore`` in a folder, if there is one.
 
-    It is never taken from the folder being scanned: a skill under review must not be
-    able to ship a file that accepts its own findings.
+    Only CI uses this, on the workspace its own workflow names. The command line never
+    picks up an ignore file by itself: a skill under review must not be able to ship a
+    file that accepts its own findings.
     """
-    candidate = Path(cwd or os.getcwd()) / IGNORE_FILE_NAME
+    candidate = Path(folder) / IGNORE_FILE_NAME
     return candidate if candidate.is_file() else None
+
+
+def _one_line(text: str) -> str:
+    """Text safe to write into a comment line: line breaks and control characters escaped."""
+    return "".join(
+        ch if ch.isprintable() or ch == " " else ch.encode("unicode_escape").decode("ascii")
+        for ch in text
+    )
 
 
 def accept_lines(results: list[tuple[SkillScanResult, Path]], ignore: IgnoreFile, reason: str):
@@ -211,6 +221,6 @@ def accept_lines(results: list[tuple[SkillScanResult, Path]], ignore: IgnoreFile
             if finger in seen:
                 continue
             seen.add(finger)
-            lines.append(f"# {finding.rule_id} {finding.name}: {path}")
+            lines.append(f"# {finding.rule_id} {finding.name}: {_one_line(path)}")
             lines.append(f"{finger}  -  {reason}")
     return lines

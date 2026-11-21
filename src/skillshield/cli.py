@@ -41,12 +41,14 @@ def _accepted_json(result) -> list[dict]:
             "severity": a.finding.severity.value,
             "reason": a.reason,
             "fingerprint": a.fingerprint,
+            "snippets": a.finding.snippets[:3],
+            "line_numbers": a.finding.line_numbers[:5],
         }
         for a in result.accepted
     ]
 
 
-def _print_accepted(results, show: bool, ignore_name: str) -> None:
+def _print_accepted(results, show: bool, ignore_name: str, verbose: bool = False) -> None:
     """Say how many findings were accepted, and with --show-accepted, which and why."""
     accepted = [(r, a) for r in results for a in r.accepted]
     if not accepted:
@@ -55,22 +57,28 @@ def _print_accepted(results, show: bool, ignore_name: str) -> None:
     if show:
         for r, a in accepted:
             print(f"    [{a.finding.rule_id}] {r.skill_name}: {a.reason} ({a.fingerprint})")
+            if a.finding.line_numbers:
+                print(f"      Lines: {a.finding.line_numbers[:5]}")
+            if verbose:
+                for snippet in a.finding.snippets[:3]:
+                    print(f"      Matched: ...{snippet[:120].replace(chr(10), ' ')}...")
     else:
         print("  Run with --show-accepted to list them.")
     print()
 
 
 def _load_ignore(args):
-    """The ignore file for this scan, None for no file, or an exit code on error."""
-    from skillshield.ignore import IgnoreFileError, find_default, load
+    """The ignore file for this scan, None for no file, or an exit code on error.
 
-    if getattr(args, "no_ignore_file", False):
-        return None
+    Only a file named with --ignore-file is read. Picking one up from the current folder
+    would trust whatever folder the command happens to run in, including a downloaded
+    skill under review.
+    """
+    from skillshield.ignore import IgnoreFileError, load
+
     path = getattr(args, "ignore_file", None)
-    if path is None:
-        path = find_default()
-        if path is None:
-            return None
+    if path is None or getattr(args, "no_ignore_file", False):
+        return None
     try:
         return load(path)
     except IgnoreFileError as exc:
@@ -218,6 +226,7 @@ def _emit_batch(report, args, source: str | None = None) -> int:
             report.results,
             getattr(args, "show_accepted", False),
             getattr(args, "ignore_name", ".skillshield-ignore"),
+            getattr(args, "verbose", False),
         )
     if report.error_count > 0:
         return 2
@@ -326,6 +335,7 @@ def _emit_single(results, args, source: str | None = None) -> int:
             results,
             getattr(args, "show_accepted", False),
             getattr(args, "ignore_name", ".skillshield-ignore"),
+            getattr(args, "verbose", False),
         )
     if results[0].risk_level == "ERROR":
         return 2
@@ -466,6 +476,14 @@ def cmd_accept(args) -> int:
     else:
         print(f"Error: {target} not found", file=sys.stderr)
         return 2
+    unreadable = [r.skill_name for r, _ in pairs if r.risk_level == "ERROR"]
+    if unreadable:
+        print(
+            "Error: these files could not be read, so nothing was accepted: "
+            + ", ".join(unreadable),
+            file=sys.stderr,
+        )
+        return 2
     for result, file in pairs:
         ignore.apply(result, file)
     lines = accept_lines(pairs, ignore, reason)
@@ -577,8 +595,7 @@ Examples:
     p_scan.add_argument(
         "--ignore-file",
         metavar="PATH",
-        help="Accept the findings listed in this file "
-        "(default: .skillshield-ignore in the current folder, if there is one)",
+        help="Accept the findings listed in this file, such as .skillshield-ignore",
     )
     p_scan.add_argument("--no-ignore-file", action="store_true", help="Do not read any ignore file")
     p_scan.add_argument(

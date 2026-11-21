@@ -95,7 +95,7 @@ Options for `skillshield scan`:
 | `--format` | `text`, `json`, `sarif` | `text` | Output format. |
 | `--min-severity` | `critical`, `high`, `medium`, `low`, `info` | `info` | Only report findings at this severity or above. |
 | `--verbose`, `-v` | | off | Show matched snippets in text output. It also prints `Scanning ...` progress lines to stderr, so JSON and SARIF output on stdout stay valid. |
-| `--ignore-file` | a path | `.skillshield-ignore` in the current folder | Accept the findings listed in this file. See [Accepting a reviewed finding](#accepting-a-reviewed-finding). |
+| `--ignore-file` | a path | none | Accept the findings listed in this file, such as `.skillshield-ignore`. See [Accepting a reviewed finding](#accepting-a-reviewed-finding). |
 | `--no-ignore-file` | | off | Do not read any ignore file. |
 | `--show-accepted` | | off | List each accepted finding with its reason. |
 
@@ -107,7 +107,7 @@ Set `NO_COLOR` to any non-empty value, or pass `--no-color` to `scan` or `check`
 
 ### Accepting a reviewed finding
 
-Some findings are expected: documentation that quotes an attack as an example, or a package index your team runs. Once you have reviewed one, accept it in a `.skillshield-ignore` file at the root of your repository, with the reason. Accepted findings no longer count towards the risk level or the exit code, but they are never hidden: the report says how many were accepted, `--show-accepted` lists them, and SARIF output keeps them marked as suppressed with the reason.
+Some findings are expected: documentation that quotes an attack as an example, or a package index your team runs. Once you have reviewed one, accept it in a `.skillshield-ignore` file at the root of your repository, with the reason, and pass it with `--ignore-file .skillshield-ignore`. Accepted findings no longer count towards the risk level or the exit code, but they are never hidden: the report says how many were accepted, `--show-accepted` lists them, and SARIF output keeps them marked as suppressed with the reason.
 
 ```
 # rule or fingerprint    path glob         reason (required)
@@ -125,9 +125,10 @@ A fingerprint is tied to the rule, the file and the text that matched. Moving th
 
 ```bash
 skillshield accept docs/ --reason "Attack phrases quoted as examples, reviewed 21 Nov 2026"
+skillshield scan . --ignore-file .skillshield-ignore
 ```
 
-SkillShield reads `.skillshield-ignore` from the folder you run it in, or the file given with `--ignore-file`. It never reads one from inside the folder being scanned, so a skill under review cannot accept its own findings, and it does not use one for GitHub URL scans or `--installed`. An entry that accepted nothing in a scan prints a warning, so old entries get cleaned up.
+On the command line, SkillShield only reads the file you name with `--ignore-file`. It never picks one up by itself, so a skill you downloaded cannot accept its own findings, even when you scan it from inside its own folder, and an ignore file is not used for GitHub URL scans or `--installed`. The GitHub Action and `python -m skillshield.ci` read `.skillshield-ignore` from the repository root by default, because the workflow that runs them belongs to the repository; any change to that file shows in the pull request that makes it. An entry that accepted nothing in a scan prints a warning, so old entries get cleaned up.
 
 ### Check a skill before you install it
 
