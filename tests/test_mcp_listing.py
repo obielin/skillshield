@@ -528,6 +528,15 @@ def test_sg105_flags_a_tool_in_a_jsonrpc_response():
     assert _sg105_hits(text) == [("exec", 'tool "exec" has no description', 1)]
 
 
+def test_sg105_escapes_control_characters_in_tool_name():
+    text = json.dumps({"serverInfo": {}, "tools": [{"name": "run\x1b[2J"}]})
+
+    assert [snippet for _, snippet, _ in _sg105_hits(text)] == [
+        r'tool "run\x1b[2J" has no description',
+        r'tool "run\x1b[2J" has no inputSchema',
+    ]
+
+
 def test_sg105_does_not_flag_a_tool_with_a_description_and_a_schema():
     text = '{"serverInfo": {}, "tools": [{"name": "read_file", "description": "Read a file.", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}}}]}'
     assert _sg105_hits(text) == []

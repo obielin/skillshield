@@ -2311,10 +2311,11 @@ def _listing_tool_gaps(listing: ToolListing) -> list[tuple[McpTool, str]]:
     """A tool with no usable description, or no input schema, in a tool listing."""
     hits: list[tuple[McpTool, str]] = []
     for tool in listing.tools:
+        name = _escape_control_characters(tool.name)
         if not (tool.description or "").strip():
-            hits.append((tool, f'tool "{tool.name}" has no description'))
+            hits.append((tool, f'tool "{name}" has no description'))
         if tool.input_schema is None:
-            hits.append((tool, f'tool "{tool.name}" has no inputSchema'))
+            hits.append((tool, f'tool "{name}" has no inputSchema'))
     return hits
 
 

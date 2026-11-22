@@ -424,9 +424,10 @@ and never calls a tool: the scan works offline and sends nothing.
 | SG-015 | MEDIUM | Well-known Skill Name Impersonation | Frontmatter names that closely resemble canonical skill names or add suspicious suffixes such as `1` or `-pro`. |
 | SG-103 | HIGH | Unrestricted Path Parameter | Each filesystem path parameter needs its own `pattern` or `enum` (including array `items`); a restriction on another field does not hide it. |
 | SG-104 | HIGH | Suspicious Tool Name | An MCP tool in a saved listing whose name suggests harmful behaviour, such as `harvest_credentials`, `exfiltrate_data`, `steal_cookies`, `leak_secrets`, `bypass_auth`, `intercept_requests`, `sniff_traffic`, `dump_credentials` or `upload_all_files`. Words are matched whole, so `stealth_mode_toggle` and `dump_truck_lookup` are not flagged. |
+| SG-105 | MEDIUM | Tool with No Description or Input Schema | An MCP tool in a saved listing with a missing or blank description, or no input schema. |
 | SG-106 | LOW | Excessive Tool Count | A server exposes more than 50 tools, increasing tool-selection confusion and the attack surface for tool poisoning. |
 
-That is 5 CRITICAL rules, 10 HIGH rules, 2 MEDIUM rules and 1 LOW rule. Run `skillshield rules` to see each rule with its tags.
+That is 5 CRITICAL rules, 10 HIGH rules, 3 MEDIUM rules and 1 LOW rule (19 rules total). Run `skillshield rules` to see each rule with its tags.
 
 In a saved MCP listing, the rules above read the file as it is saved, so a plain instruction
 in a tool's description is caught by SG-001 in the same way as in a skill. Text hidden behind
