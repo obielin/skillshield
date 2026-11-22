@@ -280,16 +280,28 @@ def test_a_lock_file_that_is_a_link_is_left_out_not_its_target(workdir, monkeypa
     assert entry["risk_level"] in ("HIGH", "CRITICAL")
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links and POSIX modes")
-def test_writing_the_lock_does_not_follow_a_planted_temporary_file(workdir, monkeypatch):
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
+def test_writing_the_lock_refuses_a_planted_temporary_file(workdir, monkeypatch, capsys):
     _skill(workdir / "s", {"SKILL.md": "# S\n"})
     victim = workdir / "victim.txt"
     victim.write_bytes(b"keep me\n")
-    (workdir / f".skillshield.lock.{os.getpid()}.tmp").symlink_to(victim)
+    monkeypatch.setattr(lock.secrets, "token_hex", lambda n: "planted")
+    (workdir / ".skillshield.lock.planted.tmp").symlink_to(victim)
+
+    assert _run_cli(monkeypatch, "lock", "s") == 2
+
+    assert "File exists" in capsys.readouterr().out
+    assert victim.read_bytes() == b"keep me\n"
+    assert (workdir / ".skillshield.lock.planted.tmp").is_symlink()
+    assert not (workdir / "skillshield.lock").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs POSIX modes")
+def test_the_lock_file_gets_the_umask_mode(workdir, monkeypatch):
+    _skill(workdir / "s", {"SKILL.md": "# S\n"})
 
     assert _run_cli(monkeypatch, "lock", "s") == 0
 
-    assert victim.read_bytes() == b"keep me\n"
     umask = os.umask(0)
     os.umask(umask)
     assert (workdir / "skillshield.lock").stat().st_mode & 0o777 == 0o666 & ~umask
