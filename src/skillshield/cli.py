@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from skillshield import __version__
+from skillshield.ci import FAIL_ON, decide
 from skillshield.scanner import decode_text
 
 
@@ -228,9 +229,7 @@ def _emit_batch(report, args, source: str | None = None) -> int:
             getattr(args, "ignore_name", ".skillshield-ignore"),
             getattr(args, "verbose", False),
         )
-    if report.error_count > 0:
-        return 2
-    return 1 if any(r.risk_level in ("CRITICAL", "HIGH") for r in report.results) else 0
+    return decide(report.results, [], FAIL_ON[getattr(args, "fail_on", "high")])
 
 
 def _emit_installed(installed, args) -> int:
@@ -288,9 +287,7 @@ def _emit_installed(installed, args) -> int:
         color_fn = (lambda text, level: text) if no_color else _color
         print(format_installed_text(installed, verbose=args.verbose, color_fn=color_fn))
 
-    if report.error_count > 0:
-        return 2
-    return 1 if any(r.risk_level in ("CRITICAL", "HIGH") for r in report.results) else 0
+    return decide(report.results, [], FAIL_ON[getattr(args, "fail_on", "high")])
 
 
 def _emit_single(results, args, source: str | None = None) -> int:
@@ -337,9 +334,7 @@ def _emit_single(results, args, source: str | None = None) -> int:
             getattr(args, "ignore_name", ".skillshield-ignore"),
             getattr(args, "verbose", False),
         )
-    if results[0].risk_level == "ERROR":
-        return 2
-    return 1 if results[0].risk_level in ("CRITICAL", "HIGH") else 0
+    return decide(results, [], FAIL_ON[getattr(args, "fail_on", "high")])
 
 
 def cmd_scan(args) -> int:
@@ -564,6 +559,7 @@ def main() -> None:
 Examples:
   skillshield scan SKILL.md
   skillshield scan ./skills/ --format json
+  skillshield scan ./skills/ --fail-on medium
   skillshield scan --installed
   skillshield scan SKILL.md --min-severity high --verbose
   skillshield accept docs/ --reason "Attack phrases quoted as examples"
@@ -584,6 +580,12 @@ Examples:
         help="Scan skill folders already installed for common coding agents",
     )
     p_scan.add_argument("--format", choices=["text", "json", "sarif"], default="text")
+    p_scan.add_argument(
+        "--fail-on",
+        choices=list(FAIL_ON),
+        default="high",
+        help="Exit 1 at this risk level or above; none only fails on errors (default: high)",
+    )
     p_scan.add_argument(
         "--min-severity",
         default="info",
