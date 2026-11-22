@@ -520,14 +520,14 @@ def cmd_lock(args) -> int:
     from skillshield.lock import LockError, build_lock, find_skills, write_lock
 
     target = Path(args.target)
-    if not target.exists():
-        print(f"Error: {args.target} not found")
-        return 2
     lock_file = Path(args.output)
-    if not lock_file.name or lock_file.is_dir():
-        print(f"Error: --output {args.output} must be a file path, not a directory")
-        return 2
     try:
+        if not target.exists():
+            print(f"Error: {args.target} not found")
+            return 2
+        if not lock_file.name or lock_file.is_dir():
+            print(f"Error: --output {args.output} must be a file path, not a directory")
+            return 2
         skills = find_skills(target) if target.is_dir() else []
         if not skills:
             print(

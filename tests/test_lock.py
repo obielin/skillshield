@@ -267,6 +267,51 @@ def test_a_lock_file_named_another_way_is_not_locked(workdir, monkeypatch, clock
     assert list(json.loads(first)["skills"]["."]["files"]) == ["SKILL.md"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links")
+def test_a_lock_file_that_is_a_link_is_left_out_not_its_target(workdir, monkeypatch):
+    skill = workdir / "s"
+    _skill(skill, {"SKILL.md": RISKY})
+    (skill / "skillshield.lock").symlink_to("SKILL.md")
+
+    assert _run_cli(monkeypatch, "lock", "s", "-o", "s/skillshield.lock") == 0
+
+    entry = json.loads((skill / "skillshield.lock").read_text())["skills"]["."]
+    assert list(entry["files"]) == ["SKILL.md"]
+    assert entry["risk_level"] in ("HIGH", "CRITICAL")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symbolic links and POSIX modes")
+def test_writing_the_lock_does_not_follow_a_planted_temporary_file(workdir, monkeypatch):
+    _skill(workdir / "s", {"SKILL.md": "# S\n"})
+    victim = workdir / "victim.txt"
+    victim.write_bytes(b"keep me\n")
+    (workdir / f".skillshield.lock.{os.getpid()}.tmp").symlink_to(victim)
+
+    assert _run_cli(monkeypatch, "lock", "s") == 0
+
+    assert victim.read_bytes() == b"keep me\n"
+    umask = os.umask(0)
+    os.umask(umask)
+    assert (workdir / "skillshield.lock").stat().st_mode & 0o777 == 0o666 & ~umask
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0, reason="needs POSIX permissions, not root"
+)
+@pytest.mark.parametrize(
+    "args", [("hidden/s",), ("s", "-o", "hidden/skillshield.lock")], ids=["target", "output"]
+)
+def test_a_path_that_cannot_be_checked_exits_2(workdir, monkeypatch, capsys, args):
+    _skill(workdir / "s", {"SKILL.md": "# S\n"})
+    _skill(workdir / "hidden" / "s", {"SKILL.md": "# S\n"})
+    (workdir / "hidden").chmod(0)
+    try:
+        assert _run_cli(monkeypatch, "lock", *args) == 2
+    finally:
+        (workdir / "hidden").chmod(0o755)
+    assert "Permission denied" in capsys.readouterr().out
+
+
 def test_an_unreadable_file_exits_2(workdir, monkeypatch, capsys):
     _skill(workdir / "skills" / "weather", {"SKILL.md": "# Weather\n", "secret.bin": b"x"})
     real_open = Path.open
@@ -318,7 +363,7 @@ def test_a_changed_file_updates_the_lock(workdir, monkeypatch, clock):
     _skill(workdir / "skills" / "weather", {"SKILL.md": "# Weather\n"})
     assert _run_cli(monkeypatch, "lock", "skills") == 0
 
-    (workdir / "skills" / "weather" / "SKILL.md").write_text("# Weather v2\n")
+    (workdir / "skills" / "weather" / "SKILL.md").write_bytes(b"# Weather v2\n")
     assert _run_cli(monkeypatch, "lock", "skills") == 0
 
     lock_data = _lock(workdir)

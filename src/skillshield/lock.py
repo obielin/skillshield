@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import stat
 from datetime import datetime, timezone
 from pathlib import Path
@@ -124,7 +125,8 @@ def build_lock(skills: list[Path], lock_file: Path) -> dict:
     scanner = SkillScanner()
     lock_dir = Path(os.path.abspath(lock_file)).parent
     try:
-        info = lock_file.stat()
+        # lstat, because os.replace replaces a link at that path, not the file it points to.
+        info = lock_file.lstat()
         # st_ino is only unique when it is non-zero, so 0 cannot identify the file.
         exclude = (info.st_dev, info.st_ino) if info.st_ino else None
     except FileNotFoundError:
@@ -164,9 +166,13 @@ def write_lock(lock: dict, lock_file: Path) -> None:
             lock = {**lock, "locked_at": previous["locked_at"]}
     data = (json.dumps(lock, indent=2, sort_keys=True) + "\n").encode("utf-8")
     lock_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = lock_file.with_name(f".{lock_file.name}.{os.getpid()}.tmp")
+    tmp = lock_file.with_name(f".{lock_file.name}.{secrets.token_hex(8)}.tmp")
+    # O_EXCL refuses a file or link planted at that name. mkstemp does too, but it
+    # creates the file 0600, and the lock should get the usual umask mode.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
     try:
-        tmp.write_bytes(data)
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
         os.replace(tmp, lock_file)
     except BaseException:
         tmp.unlink(missing_ok=True)
