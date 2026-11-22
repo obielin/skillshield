@@ -85,6 +85,7 @@ skillshield check "some text to scan"      # scan text given on the command line
 skillshield accept docs/ --reason "..."    # accept the findings in docs/ after review
 skillshield rules                          # list all rules
 skillshield lock ./skills/                 # record a hash of every file in each skill
+skillshield verify ./skills/               # report what changed since the lock
 skillshield --version
 ```
 
@@ -105,6 +106,27 @@ Options for `skillshield scan`:
 Set `NO_COLOR` to any non-empty value, or pass `--no-color` to `scan` or `check`, to disable coloured terminal output. Redirected output stays plain; an empty `NO_COLOR` value leaves terminal colours enabled.
 
 `skillshield lock` writes `skillshield.lock` (or the path given with `--output`): a SHA-256 hash of every file in each skill, and the risk level each skill had when it was locked. A skill is a directory with a `SKILL.md`. Directories skipped during scanning are left out, except compiled Python, and symbolic links are recorded by their target without being followed. The file has sorted keys and paths relative to itself, so locking the same skills again gives the same bytes and the file diffs cleanly in git.
+
+`skillshield verify` hashes the skills again and compares them with `skillshield.lock` (or the path given with `--lock`). For each skill it names the files added, removed or changed (a changed symbolic link points somewhere else) and a change in risk level, then the skills that are new since locking and the locked skills that are missing. Only locked skills under the given path are compared, so verifying one skill does not report the rest as missing. `--format json` prints the same report as JSON with sorted keys:
+
+```json
+{
+  "changed": true,
+  "missing_skills": ["skills/old"],
+  "new_skills": ["skills/calendar"],
+  "skills": {
+    "skills/weather": {
+      "added": ["scripts/new.py"],
+      "changed": ["SKILL.md"],
+      "removed": [],
+      "risk_level": {"current": "HIGH", "locked": "SAFE"}
+    }
+  },
+  "skillshield_version": {"current": "1.3.0", "locked": "1.2.0"}
+}
+```
+
+`skills` lists only the skills with a change. A skill found under another spelling of its locked path, through a symbolic link or in another case, is reported under the locked path. A newer SkillShield can give a skill another risk level with no file changed, because its rules changed; the text report then names both versions (`locked` is `null` in JSON if the lock does not record one), and running `skillshield lock` again after a review records the new level. The lock hashes raw bytes, so a checkout that rewrites line endings (Git's `core.autocrlf` on Windows) reports text files as changed; lock and verify on the same kind of checkout, or set line endings in `.gitattributes`.
 
 `skillshield rules --format json` lists every rule's `id`, `name`, `severity`, `tags`, `description` and `remediation` as a JSON array. `--format text` preserves the default rules listing.
 
@@ -250,6 +272,7 @@ This text has prompt injection and a URL but no file system access, so SG-011 do
 | `skillshield scan --installed` | at least one file is CRITICAL or HIGH | any file or folder cannot be read (missing locations are skipped) | 0 |
 | `skillshield check` | there is at least one finding | | 0 |
 | `skillshield lock` | | the path does not exist, it holds no skills, or a file or directory in a skill cannot be read or scanned | 0 |
+| `skillshield verify` | a file, a skill or a risk level changed since the lock | the lock file is missing, cannot be read, is not valid JSON or has an unsupported `lock_version`; the path does not exist or holds no skills and none are locked under it, or it is inside a locked skill; or a file or directory in a skill cannot be read or scanned | 0 |
 
 A directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate (unreadable subfolders are not reported by plain directory scans, while `--installed` reports both unreadable files and unreadable folders).
 

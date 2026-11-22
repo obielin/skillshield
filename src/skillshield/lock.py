@@ -1,4 +1,4 @@
-"""Record a hash of every file in each skill, so later changes can be detected."""
+"""Record a hash of every file in each skill, and report what changed since."""
 
 from __future__ import annotations
 
@@ -146,12 +146,47 @@ def build_lock(skills: list[Path], lock_file: Path) -> dict:
     }
 
 
-def _previous_lock(lock_file: Path) -> dict | None:
+def _is_skill_entry(entry: object) -> bool:
+    return (
+        isinstance(entry, dict)
+        and isinstance(entry.get("files"), dict)
+        and all(isinstance(value, str) for value in entry["files"].values())
+        and not any("\0" in name for name in entry["files"])
+        and isinstance(entry.get("risk_level"), str)
+    )
+
+
+def read_lock(lock_file: Path) -> dict:
+    """Read and check a lock file written by write_lock."""
     try:
-        previous = json.loads(lock_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return previous if isinstance(previous, dict) else None
+        # Checked first, so a FIFO is refused instead of blocking the read.
+        if not stat.S_ISREG(lock_file.stat().st_mode):
+            raise LockError(f"{lock_file} is not a regular file")
+        data = json.loads(lock_file.read_bytes())
+    except FileNotFoundError as exc:
+        raise LockError(f"{lock_file} not found; run skillshield lock first") from exc
+    except OSError as exc:
+        raise LockError(f"could not read {lock_file}: {exc}") from exc
+    except (ValueError, RecursionError) as exc:
+        raise LockError(f"{lock_file} is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise LockError(f"{lock_file} is not a skillshield lock file")
+    version = data.get("lock_version")
+    # type() and not ==, because JSON true and 1.0 both compare equal to 1.
+    if type(version) is not int or version != LOCK_VERSION:
+        raise LockError(
+            f"{lock_file} has lock_version {version!r}; this skillshield reads {LOCK_VERSION}"
+        )
+    skills = data.get("skills")
+    if (
+        not isinstance(skills, dict)
+        or not all(map(_is_skill_entry, skills.values()))
+        or any("\0" in key for key in skills)
+    ):
+        raise LockError(f"{lock_file} is not a skillshield lock file")
+    if not isinstance(data.get("skillshield_version", ""), str):
+        raise LockError(f"{lock_file} is not a skillshield lock file")
+    return data
 
 
 def write_lock(lock: dict, lock_file: Path) -> None:
@@ -160,7 +195,10 @@ def write_lock(lock: dict, lock_file: Path) -> None:
     When nothing but the time would change, the previous locked_at is kept, so
     locking the same skills again gives a byte-identical file.
     """
-    previous = _previous_lock(lock_file)
+    try:
+        previous = read_lock(lock_file)
+    except LockError:
+        previous = None
     if previous is not None and "locked_at" in previous:
         if {**previous, "locked_at": lock["locked_at"]} == lock:
             lock = {**lock, "locked_at": previous["locked_at"]}
@@ -177,3 +215,121 @@ def write_lock(lock: dict, lock_file: Path) -> None:
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def _compare_skill(locked: dict, current: dict) -> dict | None:
+    old, new = locked["files"], current["files"]
+    changes = {
+        "added": sorted(new.keys() - old.keys()),
+        "removed": sorted(old.keys() - new.keys()),
+        "changed": sorted(name for name in old.keys() & new.keys() if old[name] != new[name]),
+        "risk_level": {"locked": locked["risk_level"], "current": current["risk_level"]},
+    }
+    unchanged = locked["risk_level"] == current["risk_level"]
+    if unchanged and not (changes["added"] or changes["removed"] or changes["changed"]):
+        return None
+    return changes
+
+
+def compare_locks(locked: dict, current: dict) -> dict:
+    """What changed from the locked skills to the current ones."""
+    old, new = locked["skills"], current["skills"]
+    skills = {}
+    for key in sorted(old.keys() & new.keys()):
+        changes = _compare_skill(old[key], new[key])
+        if changes is not None:
+            skills[key] = changes
+    new_skills = sorted(new.keys() - old.keys())
+    missing_skills = sorted(old.keys() - new.keys())
+    return {
+        "changed": bool(skills or new_skills or missing_skills),
+        "missing_skills": missing_skills,
+        "new_skills": new_skills,
+        "skills": skills,
+    }
+
+
+def _is_within(path: str, directory: str) -> bool:
+    path, directory = os.path.normcase(path), os.path.normcase(directory)
+    try:
+        return os.path.commonpath([path, directory]) == directory
+    except ValueError:  # Windows: different drives
+        return False
+
+
+def _identity(path: str) -> tuple[int, int] | None:
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return (info.st_dev, info.st_ino) if info.st_ino else None
+
+
+def _ancestors(path: str):
+    while True:
+        yield path
+        parent = os.path.dirname(path)
+        if parent == path:
+            return
+        path = parent
+
+
+def _lock_spelling(root: str, locked_paths: list[str]) -> str:
+    """root spelled the way the lock spells the same directory.
+
+    A target reached another way, in another case or through a symbolic link,
+    is then compared path by path, the same way lock wrote it. Directories are
+    matched by (device, inode) and not by realpath, because two locked skills can
+    be one directory under two names, and each keeps its own name.
+    """
+    if any(_is_within(path, root) or _is_within(root, path) for path in locked_paths):
+        return root
+    spellings: dict[tuple[int, int], str] = {}
+    for path in sorted(locked_paths):
+        for ancestor in _ancestors(path):
+            identity = _identity(ancestor)
+            if identity is None:
+                continue
+            # Two locked skills can be one directory; prefer the one that is not a link.
+            known = spellings.get(identity)
+            if known is None or (os.path.islink(known) and not os.path.islink(ancestor)):
+                spellings[identity] = ancestor
+    for ancestor in _ancestors(root):
+        spelled = spellings.get(_identity(ancestor))
+        if spelled is not None:
+            return os.path.normpath(os.path.join(spelled, os.path.relpath(root, ancestor)))
+    return root
+
+
+def verify(target: Path, lock_file: Path) -> dict:
+    """Lock the skills under target again and compare them with lock_file.
+
+    Only locked skills under target are compared, so verifying one skill of a
+    locked folder does not report the others as missing.
+    """
+    locked = read_lock(lock_file)
+    lock_dir = os.path.dirname(os.path.abspath(lock_file))
+    paths = {key: os.path.abspath(os.path.join(lock_dir, key)) for key in locked["skills"]}
+    root = os.path.abspath(target)
+    # abspath drops ".." as text, and the OS resolves it after following links.
+    if _identity(root) != _identity(str(target)):
+        raise LockError(f"{target} leads somewhere else once its links are followed")
+    root = _lock_spelling(root, list(paths.values()))
+    for key, path in paths.items():
+        if _is_within(root, path) and os.path.normcase(root) != os.path.normcase(path):
+            raise LockError(f"{target} is inside the locked skill {key}; verify {key} instead")
+    in_target = {
+        key: entry for key, entry in locked["skills"].items() if _is_within(paths[key], root)
+    }
+    skills = find_skills(Path(root)) if os.path.isdir(root) else []
+    if not skills and not in_target:
+        if not target.exists():
+            raise LockError(f"{target} not found")
+        raise LockError(f"no skills found in {target}, and {lock_file} has none under it")
+    current = build_lock(skills, lock_file)
+    report = compare_locks({"skills": in_target}, current)
+    report["skillshield_version"] = {
+        "current": __version__,
+        "locked": locked.get("skillshield_version"),
+    }
+    return report
