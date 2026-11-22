@@ -20,7 +20,6 @@ ORDER = [Severity.INFO, Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.C
 # once the corresponding rule lands and the test starts passing.
 KNOWN_GAPS = {
     "sg-101-unsafe-auth",
-    "sg-102-overbroad-permissions",
     "sg-105-missing-schema",
 }
 

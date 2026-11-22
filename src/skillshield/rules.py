@@ -2135,6 +2135,54 @@ RULE_COMPILED_PYTHON = Rule(
 )
 
 
+# ── SG-102: Over-broad Tool Permissions ────────────────────────
+
+# Ported from mcpscan MR-003; only descriptions in parsed tool listings are checked.
+_OVERBROAD_PERMISSION_PATTERNS = [
+    re.compile(r"\b" + pattern + r"\b", re.IGNORECASE)
+    for pattern in [
+        r"(?:read|write|delete|list)\s+(?:all|any|every)\s+files?",
+        r"full\s+(?:file\s*)?system\s+access",
+        r"access\s+(?:all|any)\s+(?:files?|directories?|paths?)",
+        r"unrestricted\s+(?:file|disk|storage)\s+access",
+        r"(?:access|connect\s+to|query)\s+(?:all|any)\s+(?:urls?|endpoints?|servers?|hosts?)",
+        r"unrestricted\s+(?:network|internet|http)\s+access",
+        r"make\s+(?:any|all|arbitrary)\s+(?:http|network)\s+requests?",
+    ]
+]
+
+
+def _check_overbroad_permissions(listing: ToolListing) -> list[tuple[McpTool, str]]:
+    matches = []
+    for tool in listing.tools:
+        for pattern in _OVERBROAD_PERMISSION_PATTERNS:
+            match = pattern.search(tool.description or "")
+            if match:
+                snippet = f"Tool '{tool.name}': {match.group(0)}"
+                matches.append((tool, _escape_control_characters(snippet)))
+                break
+    return matches
+
+
+RULE_OVERBROAD_PERMISSIONS = Rule(
+    id="SG-102",
+    name="Over-broad Tool Permissions",
+    severity=Severity.HIGH,
+    description=(
+        "An MCP tool's description claims unrestricted filesystem or network access, "
+        "such as access to any file or arbitrary HTTP requests. This violates the "
+        "principle of least privilege. Ported from mcpscan MR-003."
+    ),
+    remediation=(
+        "Scope the tool to the minimum required access, using explicit path allowlists "
+        "for files and domain allowlists for network requests. Enforce these limits on "
+        "the server and describe them in the tool listing."
+    ),
+    listing_fn=_check_overbroad_permissions,
+    tags=["mcp", "permissions", "least-privilege", "owasp-asi02", "owasp-ast03"],
+)
+
+
 # ── SG-104: Suspicious Tool Name ───────────────────────────────
 
 # A tool name is split into words, at "_", "-", "." and camelCase boundaries, and a
@@ -2322,6 +2370,7 @@ ALL_RULES: list[Rule] = [
     RULE_PACKAGE_REGISTRY,
     RULE_BRAND_NAME_IMPERSONATION,
     RULE_COMPILED_PYTHON,
+    RULE_OVERBROAD_PERMISSIONS,
     RULE_UNRESTRICTED_PATH,
     RULE_SUSPICIOUS_TOOL_NAME,
     RULE_EXCESSIVE_TOOL_COUNT,
