@@ -11,6 +11,7 @@ import unicodedata
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
@@ -868,10 +869,16 @@ RULE_IDENTITY_HIJACK = Rule(
 
 # ── SG-005: Secret Harvesting ──────────────────────────────────
 
+_SECRET_API_FIELD = (
+    r"(?:api[_\s]?key|secret[_\s]?key|access[_\s]?token|auth[_\s]?token|bearer[_\s]?token)"
+)
+_SECRET_PASSWORD_FIELD = r"(?:password|passwd|pwd)"
+_SECRET_CLOUD_FIELD = r"(?:aws|gcp|azure)[_\s]?(?:access|secret|key)[_\s]?(?:id|key)?"
+
 _SECRET_PATTERNS = [
-    r"(?:api[_\s]?key|secret[_\s]?key|access[_\s]?token|auth[_\s]?token|bearer[_\s]?token)\s*[=:]\s*['\"][a-zA-Z0-9_\-]{16,}['\"]",
-    r"(?:password|passwd|pwd)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
-    r"(?:aws|gcp|azure)[_\s]?(?:access|secret|key)[_\s]?(?:id|key)?\s*[=:]\s*['\"][A-Z0-9]{16,}['\"]",
+    _SECRET_API_FIELD + r"\s*[=:]\s*['\"][a-zA-Z0-9_\-]{16,}['\"]",
+    _SECRET_PASSWORD_FIELD + r"\s*[=:]\s*['\"][^'\"]{8,}['\"]",
+    _SECRET_CLOUD_FIELD + r"\s*[=:]\s*['\"][A-Z0-9]{16,}['\"]",
     r"sk-[a-zA-Z0-9_\-]{32,}",
     r"ghp_[a-zA-Z0-9]{36}",
     r"(?:private[_\s]?key|-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----)",
@@ -2135,6 +2142,114 @@ RULE_COMPILED_PYTHON = Rule(
 )
 
 
+# ── SG-101: Unsafe Server Authentication ──────────────────────
+
+# Share SG-005's credential field names; manifests also use bare token/secret fields.
+_AUTH_CREDENTIAL_FIELD = re.compile(
+    rf"(?:{_SECRET_API_FIELD}|{_SECRET_PASSWORD_FIELD}|{_SECRET_CLOUD_FIELD}"
+    r"|secret|token|credential|client[_\s]?secret|private[_\s]?key|authorization)",
+    re.IGNORECASE,
+)
+_AUTH_ENV_REFERENCE = re.compile(
+    r"(?:(?i:Bearer|Basic)\s+)?(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*"
+    r"|env:[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%)"
+)
+_AUTH_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _auth_has_credential(auth: object) -> bool:
+    pending = [auth]
+    while pending:
+        current = pending.pop()
+        if not isinstance(current, dict):
+            continue
+        for key, value in current.items():
+            if isinstance(value, dict):
+                pending.append(value)
+            if not isinstance(value, str) or not value or _AUTH_ENV_REFERENCE.fullmatch(value):
+                continue
+            if isinstance(key, str):
+                if key.lower().endswith("env") and _AUTH_ENV_NAME.fullmatch(value):
+                    continue
+                if _AUTH_CREDENTIAL_FIELD.fullmatch(key.replace("-", "_")):
+                    return True
+            if RULE_SECRET_HARVEST.match(value):
+                return True
+    return False
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host.lower().rstrip(".") == "localhost":
+        return True
+    try:
+        address = ip_address(host)
+        return (getattr(address, "ipv4_mapped", None) or address).is_loopback
+    except ValueError:
+        return False
+
+
+def _check_unsafe_auth(listing: ToolListing) -> list[tuple[McpTool, str]]:
+    if not listing.tools:
+        return []
+    remote = False
+    insecure_http = False
+    for endpoint in (listing.url, listing.transport):
+        if not isinstance(endpoint, str):
+            continue
+        try:
+            parsed = urlparse(endpoint)
+            host = parsed.hostname
+        except ValueError:
+            continue
+        if parsed.scheme.lower() not in {"http", "https"} or not host:
+            continue
+        if not _is_loopback_host(host):
+            remote = True
+            insecure_http |= parsed.scheme.lower() == "http"
+
+    auth = listing.auth
+    missing_auth = not auth
+    if isinstance(auth, dict):
+        missing_auth |= str(auth.get("type", "")).lower() in {"none", "noauth", "disabled"}
+    elif isinstance(auth, str):
+        missing_auth |= auth.lower() in {"none", "noauth", "disabled"}
+
+    reasons = []
+    # A bare tools/list response says nothing about the server's authentication.
+    # Stdio and loopback servers do not need HTTP authentication metadata.
+    if remote and missing_auth:
+        reasons.append("remote server has no authentication declared")
+    if _auth_has_credential(auth):
+        reasons.append("hardcoded credential in authentication metadata")
+    if insecure_http:
+        reasons.append("HTTP transport to a non-loopback host")
+    if not reasons:
+        return []
+    reason = "; ".join(reasons)
+    return [
+        (tool, _escape_control_characters(f"Tool '{tool.name}': {reason}"))
+        for tool in listing.tools
+    ]
+
+
+RULE_UNSAFE_AUTH = Rule(
+    id="SG-101",
+    name="Unsafe Server Authentication",
+    severity=Severity.HIGH,
+    description=(
+        "Saved MCP server metadata declares a remote HTTP endpoint without authentication, "
+        "embeds a credential in its authentication block, or uses non-loopback HTTP. "
+        "Ported from mcpscan MR-002; this is an offline check, not a live authentication test."
+    ),
+    remediation=(
+        "Declare authentication for remote servers, load credentials from environment "
+        "variables or a secrets manager, and use HTTPS outside loopback."
+    ),
+    listing_fn=_check_unsafe_auth,
+    tags=["mcp", "authentication", "credentials", "owasp-asi03", "owasp-ast01"],
+)
+
+
 # ── SG-104: Suspicious Tool Name ───────────────────────────────
 
 # A tool name is split into words, at "_", "-", "." and camelCase boundaries, and a
@@ -2322,6 +2437,7 @@ ALL_RULES: list[Rule] = [
     RULE_PACKAGE_REGISTRY,
     RULE_BRAND_NAME_IMPERSONATION,
     RULE_COMPILED_PYTHON,
+    RULE_UNSAFE_AUTH,
     RULE_UNRESTRICTED_PATH,
     RULE_SUSPICIOUS_TOOL_NAME,
     RULE_EXCESSIVE_TOOL_COUNT,
