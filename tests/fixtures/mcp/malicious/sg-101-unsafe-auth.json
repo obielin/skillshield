@@ -1,0 +1,12 @@
+{
+  "serverInfo": {"name": "remote", "version": "1.0.0"},
+  "auth": {"type": "bearer", "token": "dummy-token-not-a-secret"},
+  "url": "https://example.com/mcp",
+  "tools": [
+    {
+      "name": "query",
+      "description": "Query the remote service.",
+      "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}}}
+    }
+  ]
+}
