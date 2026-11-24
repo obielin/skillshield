@@ -648,19 +648,20 @@ _HI_R = r"(?![\u0900-\u0963\u0966-\u097f])"
 _HI_ZA = r"(?:\u095b|ज\u093c?)"
 _HI_FILTER = r"(?:फ\u093c?|\u095e)िल्टर"
 _HI_NEG = r"(?:न|मत|नहीं|नही|कभी)"
-_HI_NOT_AFTER = r"(?![^।.!?|\n]{0,25}" + _HI_L + _HI_NEG + _HI_R + r")"
+# A semicolon ends the clause, so a negation in the next command does not cancel this one.
+_HI_NOT_AFTER = r"(?![^।.!?|;；\n]{0,25}" + _HI_L + _HI_NEG + _HI_R + r")"
 # "बंद कर दिया गया है" (was switched off) and "अनदेखा कर रहा था" report, they do not command.
 _HI_NOT_PAST = r"(?!\s+(?:दिया|दी|दिए|गया|गई|गए|गये|रहा|रही|रहे|सकत\S*|चुक\S*)" + _HI_R + r")"
 _HI_NOT_BETWEEN = r"(?!\s*(?:कभी|हरगिज)" + _HI_R + r")"
+# "सिस्टम प्रॉम्प्ट दिखाना खतरनाक है" describes disclosure with an infinitive; it asks for nothing.
+_HI_NOT_DESCRIBED = r"(?:(?<!ना)|(?!\s+(?:[^\s।.!?|]+\s+)?(?:है|हैं|था|थी|थे)" + _HI_R + r"))"
 _HI_PREVIOUS = (
     r"(?:पिछल[ेी]|पहले\s+(?:के|वाले|दिए\s+गए|दिये\s+गये|दिए\s+गये)|पूर्व(?:वर्ती)?|"
     r"ऊपर\s+(?:के|दिए\s+गए|दिये\s+गये|लिखे)|अब\s+तक\s+के|पुराने)"
 )
 _HI_ALL = r"(?:\s+(?:सभी|सारे|सारी|समस्त|तमाम|अपने|अपनी))*"
-_HI_INSTRUCTIONS = (
-    r"(?:निर्देश(?:ों)?|आदेश(?:ों)?|हिदायत(?:ों|ें)?|नियम(?:ों)?|आज्ञा(?:ओं)?|आदेशो|निर्देशो)"
-)
-_HI_IGNORE = r"(?:अनदेखा|अनदेखी|नज\u093c?र\s?अं?न?्?दा" + _HI_ZA + r"|उपेक्षा|इग्नोर)"
+_HI_INSTRUCTIONS = r"(?:निर्देश(?:ों)?|आदेश(?:ों)?|हिदायत(?:ों|ें)?|नियम(?:ों)?|आज्ञा(?:ओं)?|आदेशो|निर्देशो)"
+_HI_IGNORE = r"(?:अनदेखा|अनदेखी|न" + _HI_ZA + r"र\s?अं?न?्?दा" + _HI_ZA + r"|उपेक्षा|इग्नोर)"
 _HI_DO = r"\s+(?:कर(?:ो|ें|िए|ीजिए)?|कीजिए|कर\s+दो|कर\s+दें|कर\s+दीजिए)"
 _HI_SYSTEM_PROMPT = r"सिस्टम\s+(?:प्र[ॉो]म्प्?ट|संकेत|निर्देश|मैसेज|संदेश)"
 _HI_REVEAL = (
@@ -694,6 +695,7 @@ _PROMPT_INJECTION_PATTERNS_HI = [
     + r"\s+"
     + _HI_REVEAL
     + _HI_R
+    + _HI_NOT_DESCRIBED
     + _HI_NOT_PAST
     + _HI_NOT_AFTER,
     # नया सिस्टम प्रॉम्प्ट: / अपना सिस्टम प्रॉम्प्ट बदल दो
@@ -714,7 +716,7 @@ _PROMPT_INJECTION_PATTERNS_HI = [
     + r"|नियम)(?:ों)?\s+(?:के\s+)?"
     # Each optional word carries its own following space, so a long run of spaces can be
     # matched only one way.
-    + r"(?:(?:वाले|वाला|वाली)\s+)?(?:(?:AI|एआई|ए\.?आई\.?|असिस्टेंट|सहायक)\s+)?(?:हो|हैं|है))",
+    + r"(?:(?:वाले|वाला|वाली)\s+)?(?:(?:AI|एआई|ए\.?आई\.?|असिस्टेंट|सहायक)\s+)?(?:हो|हैं|है))" + _HI_R,
     # सुरक्षा फ़िल्टर बंद कर दो / सुरक्षा नियमों को दरकिनार करो
     _HI_L
     + r"(?:सुरक्षा|कंटेंट|सेफ्टी)\s+(?:"
@@ -727,9 +729,11 @@ _PROMPT_INJECTION_PATTERNS_HI = [
 ]
 
 _HG_NEG = r"(?:na|mat|nahi|nahin|kabhi|kabhee)"
-_HG_NOT_AFTER = r"(?![^.!?|\n]{0,25}\b" + _HG_NEG + r"\b)"
+_HG_NOT_AFTER = r"(?![^.!?|;；\n]{0,25}\b" + _HG_NEG + r"\b)"
 _HG_NOT_PAST = r"(?!\s+(?:diya|di|gaya|gayi|gaye|raha|rahi|rahe|sakt\w*|chuk\w*)\b)"
 _HG_NOT_BETWEEN = r"(?!\s+(?:kabhi|kabhee|hargiz)\b)"
+# "dikhana galat hai" describes disclosure with an infinitive; it asks for nothing.
+_HG_NOT_DESCRIBED = r"(?:(?<!ana)|(?!\s+(?:\w+\s+)?(?:hai|hain|tha|thi|the)\b))"
 _HG_PREVIOUS = (
     r"(?:pichh?l[ei]|pehle\s+(?:ke|wale|waale|diye\s+gaye)|pahle\s+(?:ke|wale|waale)|purane|"
     r"upar\s+(?:ke|likhe|diye\s+gaye)|ab\s+tak\s+ke)"
@@ -767,6 +771,7 @@ _PROMPT_INJECTION_PATTERNS_HG = [
     + _HG_NOT_BETWEEN
     + r"\s+(?:dikh(?:ao|aiye|aao|ana|a\s+do)|bata(?:o|iye|na|\s+do)|share\s+kar(?:o|na|en|iye)?|"
     + r"reveal\s+kar(?:o|na|en|iye)?|print\s+kar(?:o|na|en|iye)?)\b"
+    + _HG_NOT_DESCRIBED
     + _HG_NOT_PAST
     + _HG_NOT_AFTER,
     # naya system prompt:
@@ -799,20 +804,19 @@ _PROMPT_INJECTION_HI_RE = re.compile("|".join(_PROMPT_INJECTION_PATTERNS_HI), re
 _PROMPT_INJECTION_HG_RE = re.compile(
     "|".join(_PROMPT_INJECTION_PATTERNS_HG), re.IGNORECASE | re.MULTILINE
 )
-# Every Latin-letter Hindi pattern ends in one of these words or word pieces, which English
-# rarely has (a stray hit only means the patterns run). The
-# patterns only run on text that holds one, so English files scan as fast as before.
-_HINGLISH_HINTS = (
-    "karo", "karna", "kar do", "kar de", "kariye", "karein", "karen", "bhool", "bhul ja",
-    "dikhao", "dikhaiye", "dikha do", "batao", "bataiye", "bata do", "naya", "naye", "nayi",
-    "mein ho", "me ho", "mai ho", "main ho", "hai", " kar", "kijiye", "kijie", "hata", "dikhana",
-    "batana",
-)  # fmt: skip
+# Every Latin-letter Hindi pattern needs one of these word pieces, which English rarely has (a
+# stray hit only means the patterns run). Spaces are \s+ and case is ignored, so any spelling or
+# line break the patterns accept also passes this check.
+_HINGLISH_HINT_RE = re.compile(
+    r"\bkar(?:o|na|en|ein|iye)?\b|\bkijiye\b|\bkijie\b|\bbh(?:oo|u)l\b|\bdikh|\bbata|"
+    r"\bnay[ae]\b|\bhat(?:a|ao)\b|\bbina\b|\b(?:band|bypass|disable|off)\s+(?:do|de|dena)\b|"
+    r"\b(?:me|mein|mai|main)\s+(?:ho|hain|hai)\b",
+    re.IGNORECASE,
+)
 
 
 def _has_hinglish_hint(text: str) -> bool:
-    lowered = text.lower()
-    return any(hint in lowered for hint in _HINGLISH_HINTS)
+    return _HINGLISH_HINT_RE.search(text) is not None
 
 
 # Devanagari. The Hindi patterns only run on text that has it.
@@ -2314,7 +2318,8 @@ RULE_COMPILED_PYTHON = Rule(
 # A tool name is split into words, at "_", "-", "." and camelCase boundaries, and a
 # word must match exactly. So "stealth_mode_toggle" and "dump_truck_lookup" are not
 # flagged, while "harvest_credentials" and "steal_cookies" are. Ported from mcpscan MR-005.
-_HARMFUL_TOOL_WORDS = frozenset("""
+_HARMFUL_TOOL_WORDS = frozenset(
+    """
     exfil exfiltrate exfiltrates exfiltrated exfiltration exfiltrating
     harvest harvests harvested harvesting harvester
     steal steals stole stolen stealing stealer
@@ -2322,12 +2327,15 @@ _HARMFUL_TOOL_WORDS = frozenset("""
     bypass bypasses bypassed bypassing
     intercept intercepts intercepted intercepting interceptor
     sniff sniffs sniffer sniffing
-    """.split())
+    """.split()
+)
 # "dump" is harmful only before a target such as "credentials" or "all".
-_DUMP_TARGETS = frozenset("""
+_DUMP_TARGETS = frozenset(
+    """
     all credentials credential creds secrets secret passwords password env keys tokens token
     database db users cookies history memory
-    """.split())
+    """.split()
+)
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _NAME_SEPARATOR = re.compile(r"[^a-z0-9]+")
 
