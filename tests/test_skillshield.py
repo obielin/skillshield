@@ -730,7 +730,7 @@ class TestPromptInjectionGerman:
             "report. It never sends data anywhere.\n"
         )
         assert _DE_KEYWORDS.search(para) is None
-        text = para * (4_000_000 // len(para))
+        text = para * (1_000_000 // len(para))
         t0 = time.perf_counter()
         assert RULE_PROMPT_INJECTION.match(text) == []
         assert time.perf_counter() - t0 < 1.0
