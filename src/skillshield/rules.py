@@ -2207,8 +2207,7 @@ RULE_COMPILED_PYTHON = Rule(
 # A tool name is split into words, at "_", "-", "." and camelCase boundaries, and a
 # word must match exactly. So "stealth_mode_toggle" and "dump_truck_lookup" are not
 # flagged, while "harvest_credentials" and "steal_cookies" are. Ported from mcpscan MR-005.
-_HARMFUL_TOOL_WORDS = frozenset(
-    """
+_HARMFUL_TOOL_WORDS = frozenset("""
     exfil exfiltrate exfiltrates exfiltrated exfiltration exfiltrating
     harvest harvests harvested harvesting harvester
     steal steals stole stolen stealing stealer
@@ -2216,15 +2215,12 @@ _HARMFUL_TOOL_WORDS = frozenset(
     bypass bypasses bypassed bypassing
     intercept intercepts intercepted intercepting interceptor
     sniff sniffs sniffer sniffing
-    """.split()
-)
+    """.split())
 # "dump" is harmful only before a target such as "credentials" or "all".
-_DUMP_TARGETS = frozenset(
-    """
+_DUMP_TARGETS = frozenset("""
     all credentials credential creds secrets secret passwords password env keys tokens token
     database db users cookies history memory
-    """.split()
-)
+    """.split())
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _NAME_SEPARATOR = re.compile(r"[^a-z0-9]+")
 
