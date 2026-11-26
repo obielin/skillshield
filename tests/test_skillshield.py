@@ -2323,6 +2323,133 @@ class TestPackageRegistryRule:
         assert len(hits) == 5_000
         assert elapsed < 2.0
 
+    @pytest.mark.parametrize("wrapper", ["({})", "`{}`", "$({})"])
+    def test_pip_short_index_in_shell_wrappers(self, wrapper):
+        command = "pip install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(wrapper.format(command)) != []
+
+    @pytest.mark.parametrize("wrapper", ["({})", "`{}`", "$({})"])
+    def test_shell_wrapper_trusted_registry_passes(self, wrapper, monkeypatch):
+        monkeypatch.setattr("skillshield.rules._OFFICIAL_REGISTRY_HOSTS", {"example.com"})
+        command = "pip install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(wrapper.format(command)) == []
+
+    @pytest.mark.parametrize(
+        "executable",
+        [r"\pip", r"\pip3", r"\pip3.12", r"/usr/bin/\pip", r"/usr/bin/\pip3.12"],
+    )
+    def test_shell_escaped_pip_short_index(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    @pytest.mark.parametrize("executable", [r"\pip", r"/usr/bin/\pip"])
+    def test_shell_escaped_pip_trusted_registry_passes(self, monkeypatch, executable):
+        monkeypatch.setattr("skillshield.rules._OFFICIAL_REGISTRY_HOSTS", {"example.com"})
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    @pytest.mark.parametrize("executable", [r"company-\pip", r"\\pip", r"'\pip'", r'"\pip"'])
+    def test_non_pip_backslash_spellings_do_not_match(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    def test_double_quoted_substitution_keeps_command_boundaries(self):
+        text = 'echo "$(pip install requests; curl -i https://api.example.com/health)"'
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    def test_double_quoted_substitution_still_detects_pip_override(self):
+        text = 'echo "$(pip install -i https://example.com/simple pkg; echo done)"'
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    def test_parenthesis_heavy_non_pip_path_is_fast(self):
+        text = "(" * 20_000 + "/notpip install -i https://example.com/simple"
+        start = time.perf_counter()
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+        assert time.perf_counter() - start < 1.0
+
+    @pytest.mark.parametrize("separator", [";", "|", "&"])
+    def test_separator_inside_quoted_pip_path(self, separator):
+        text = f'"/opt/a{separator}b/bin/pip" install -i https://example.com/simple pkg'
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    def test_colon_heavy_non_pip_path_is_fast(self):
+        import time
+
+        text = "a:" * 20_000 + "/notpip install -i https://example.com/simple"
+        start = time.perf_counter()
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+        assert time.perf_counter() - start < 1.0
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # A single-quoted argument that spans two lines
+            "printf '%s\\n' 'line one\nline two'; pip install requests; "
+            "curl -i https://api.example.com/health",
+            # Several commands in one quoted string
+            "bash -c 'pip install requests; curl -i https://api.example.com/health'",
+            # An apostrophe in prose is not a quote
+            "Don't worry: pip install requests; curl -i https://api.example.com/health",
+        ],
+    )
+    def test_quotes_do_not_join_pip_to_a_later_command(self, text):
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            r"C:\Python312\Scripts\pip install -i https://example.com/simple pkg",
+            r'"C:\Program Files\Python\Scripts\pip" install -i https://example.com/simple pkg',
+            'true;"/opt/a;b/bin/pip" install -i https://example.com/simple pkg',
+        ],
+    )
+    def test_windows_and_separator_adjacent_pip_paths(self, text):
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # A quoted script that ends in /pip is not a pip executable
+            "bash -c 'pip install requests; curl -i https://api.example.com/pip'",
+            'echo " "; pip install requests; curl -i https://example.com/health; echo /bin/pip" "',
+        ],
+    )
+    def test_quoted_text_ending_in_pip_is_not_a_pip_path(self, text):
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    def test_closing_parenthesis_is_not_part_of_the_registry_url(self, monkeypatch):
+        monkeypatch.setattr("skillshield.rules._OFFICIAL_REGISTRY_HOSTS", {"pypi.org"})
+        assert RULE_PACKAGE_REGISTRY.match("(pip install requests -i https://pypi.org)") == []
+
+    def test_pip_override_inside_bash_c_is_still_flagged(self):
+        text = "bash -c 'pip install -i https://example.com/simple pkg; echo ok'"
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    @pytest.mark.parametrize(
+        "text",
+        ['"/' * 20_000 + " pip install -i https://example.com/simple", "don't " * 50_000],
+    )
+    def test_quote_heavy_line_is_fast(self, text):
+        start = time.perf_counter()
+        RULE_PACKAGE_REGISTRY.match(text)
+        assert time.perf_counter() - start < 1.0
+
+    @pytest.mark.parametrize(
+        "executable",
+        ['"/usr/bin/pip3.12"', "'/usr/bin/pip3'", '"/opt/my env/bin/pip"'],
+    )
+    def test_quoted_pip_path_short_index(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    @pytest.mark.parametrize(
+        "executable",
+        ["company-pip3.12", "/usr/bin/company-pip3.12", '"/usr/bin/company-pip3.12"'],
+    )
+    def test_prefixed_pip_name_is_not_pip(self, executable):
+        text = f"{executable} install -i https://example.com/simple pkg"
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
     @pytest.mark.parametrize("executable", ["pip3.10", "pip3.12", "pip3.13"])
     def test_versioned_pip_short_index_option(self, executable):
         text = f"{executable} install -i https://example.com/simple helper-package"

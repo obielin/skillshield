@@ -2630,8 +2630,30 @@ _REGISTRY_URL_PATTERNS = [
 # pip install command; "curl -i" and "grep -i" take the same flag and are
 # clean. A shell separator ends the command, so the scan stops there instead
 # of running to the end of the line and picking up a later "curl -i".
-_PIP_INSTALL = re.compile(r"\bpip(?:3(?:\.[0-9]+)?)?[ \t]+install\b", re.IGNORECASE)
-_PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`]+)")
+_PIP_EXECUTABLE = r"pip(?:3(?:\.[0-9]+)?)?"
+# A Windows path starts with a drive letter: C:\Python312\Scripts\pip. Each folder ends at a
+# backslash, so the repeat cannot backtrack. Unquoted, a folder name has no spaces.
+_WINDOWS_DIR = r"[A-Za-z]:\\(?:[^\\\r\n\"'`]*\\)*"
+_WINDOWS_DIR_UNQUOTED = r"[A-Za-z]:\\(?:[^\\\s\"'`]*\\)*"
+_PIP_INSTALL = re.compile(
+    r"(?<![^\s'\"(`])(?:"
+    rf'"(?:[^"\r\n]*/|{_WINDOWS_DIR})?{_PIP_EXECUTABLE}"'
+    rf"|'(?:[^'\r\n]*/|{_WINDOWS_DIR})?{_PIP_EXECUTABLE}'"
+    rf"|(?:[^\s'\"(`]*/|{_WINDOWS_DIR_UNQUOTED})?\\?{_PIP_EXECUTABLE}"
+    r")[ \t]+install\b",
+    re.IGNORECASE,
+)
+# A quoted pip path that is the command ("/opt/a;b/bin/pip" install): a separator inside it is
+# part of the path. It may follow a separator directly (true;"/opt/a;b/bin/pip" install).
+_QUOTED_PIP_PATH = re.compile(
+    r"(?<![^\s'\"(`;|&])"
+    rf'(?:"(?:[^"\r\n]*/|{_WINDOWS_DIR}){_PIP_EXECUTABLE}"'
+    rf"|'(?:[^'\r\n]*/|{_WINDOWS_DIR}){_PIP_EXECUTABLE}')"
+    r"(?=[ \t]+install\b)",
+    re.IGNORECASE,
+)
+# A closing parenthesis ends the URL: "(pip install x -i https://pypi.org)".
+_PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`)]+)")
 _SHELL_SEPARATORS = ";|&\n"
 
 
@@ -2641,14 +2663,31 @@ def _pip_short_flag_matches(text: str) -> list[tuple[str, str]]:
     # Walk each line once and cut it into commands, so a line with many
     # "pip install" tokens is still scanned in linear time.
     for line in text.splitlines(keepends=True):
+        in_path = _quoted_pip_path_positions(line)
         start = 0
         for index, char in enumerate(line):
-            if char not in _SHELL_SEPARATORS:
+            if char not in _SHELL_SEPARATORS or index in in_path:
                 continue
             matches.extend(_command_pip_short_flag_matches(line[start:index]))
             start = index + 1
         matches.extend(_command_pip_short_flag_matches(line[start:]))
     return matches
+
+
+def _quoted_pip_path_positions(line: str) -> set[int]:
+    """Return the positions in line that are inside a quoted pip path.
+
+    A separator there ("/opt/a;b/bin/pip" install) is part of the path. Every other separator
+    ends the command, quoted or not: an apostrophe in prose ("Don't") does not open a string, a
+    quote can span lines, and "bash -c '…; …'" holds several commands.
+    """
+    if '"' not in line and "'" not in line:
+        return set()
+    return {
+        index
+        for match in _QUOTED_PIP_PATH.finditer(line)
+        for index in range(match.start(), match.end())
+    }
 
 
 def _command_pip_short_flag_matches(command: str) -> list[tuple[str, str]]:
