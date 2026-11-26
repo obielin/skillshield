@@ -105,14 +105,24 @@ A PR that breaks these rules will be asked to change the samples before review c
 
 [CodeRabbit](https://www.coderabbit.ai) reviews each pull request to `main` and posts a summary and comments, usually within a few minutes. Draft pull requests are reviewed once you mark them ready for review, and pull requests from Dependabot and GitHub Actions are not reviewed. It may add the `quality-check` label to a PR that looks low-effort or machine-generated, which only means a maintainer reads it first. Its comments are suggestions: a maintainer reads every PR and makes the decision. You can reply to it, or ask it a question by mentioning `@coderabbitai` in a comment on your PR.
 
+## After your pull request is reviewed
+
+**"Changes requested" means the next step is yours.** The review says what is needed. Push new commits to the same branch (there is no need to open a new pull request), then reply to the review when you are done. If you disagree with a request or something is unclear, say so: a question is always welcome.
+
+**Keep your branch up to date.** Pull requests are merged often, so yours may go into conflict with `main`. Merge `main` into your branch, or rebase on it, and push.
+
+**A maintainer may make small fixes for you.** With "Allow edits by maintainers" turned on (the default), a maintainer may push small, mechanical changes to your branch to get it merged sooner: resolving a conflict, running the formatter, loosening a timing limit for slower CI machines, or taking out a change that belongs in its own issue. They will not change your approach without asking, and the pull request, its commits and the merged badge stay yours.
+
+**If you go quiet,** a maintainer will check in after about 10 days. After 30 days with no reply, the pull request may be closed with thanks, as described in [Adopting an abandoned pull request](#adopting-an-abandoned-pull-request). You can pick it up again at any time.
+
 ## Claiming an issue
 
 Comment `/assign` on an open issue and it is assigned to you straight away. No need to wait for a maintainer. The other commands are `/unassign` to let an issue go, and `/extend` if you need more time.
 
 How it stays fair:
 
-- **`good first issue` is for newcomers.** You can claim one if you haven't had a pull request merged here yet, one at a time. After your first merged PR, the [`help wanted`](https://github.com/obielin/skillshield/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) issues are yours.
-- **Up to three open claims at once** for everyone.
+- **Anyone can claim any issue**, whether it's your first contribution or your tenth. `good first issue` marks issues that are a good place to start; it isn't reserved for newcomers.
+- **Up to two open claims at once** for everyone, so issues keep moving and there's always something left for others.
 - **Claims free up on their own.** After 10 days with no activity from you, you get a friendly reminder; after 14 days, the issue is released for someone else. Any comment from you counts as activity, `/extend` resets the clock, and an open pull request that mentions the issue pauses it.
 - **Tracking issues** (labelled `roadmap`) are not claimed themselves: claim one of the issues they list.
 

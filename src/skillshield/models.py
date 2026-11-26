@@ -46,6 +46,10 @@ class SkillScanResult:
         line_count:    Total lines in the skill
         char_count:    Total characters in the skill
         error:         Any error encountered during scanning
+        agent:         Agent name when scanning installed skills
+        file_path:     Resolved file path when scanning installed skills
+        accepted:      Findings accepted in .skillshield-ignore, each with its reason.
+                       They are left out of findings, risk_score and risk_level.
     """
 
     skill_name: str
@@ -56,6 +60,9 @@ class SkillScanResult:
     line_count: int = 0
     char_count: int = 0
     error: str = ""
+    agent: str = ""
+    file_path: str = ""
+    accepted: list[Any] = field(default_factory=list)
 
     @property
     def is_safe(self) -> bool:
@@ -197,6 +204,8 @@ class BatchScanReport:
             lines.append(f"  UNREADABLE ({len(by_level['ERROR'])})")
             for r in by_level["ERROR"]:
                 lines.append(f"    {r.skill_name}: {r.error}")
+                for f in r.findings[:2]:
+                    lines.append(f"         -> {f.rule_id}: {f.name}")
 
         # Files the walk refused to open are named too, so skipping is visible.
         unscanned = self.metadata.get("unscanned") or []
