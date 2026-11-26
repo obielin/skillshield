@@ -13,8 +13,8 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | | Count |
 |---|---|
-| Malicious samples covered | 8 of 31 |
-| Malicious samples with an open gap | 23 of 31 |
+| Malicious samples covered | 11 of 31 |
+| Malicious samples with an open gap | 20 of 31 |
 | Payload files in a skill folder covered | 1 of 6 |
 | Safe samples wrongly flagged | 1 of 4 |
 
@@ -28,11 +28,11 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 | 04 | Zero-width characters inside words | AST08 | [Invariant Labs disclosure][invariant] | Gap: #27 |
 | 05 | Lookalike letters from other alphabets | AST08 | [Invariant Labs disclosure][invariant] | Gap: #27 |
 | 20 | Fake `<SYSTEM>` tag and "developer mode" | AST01 | [Snyk ToxicSkills][snyk-tox], [Invariant Labs][invariant] | Gap: #49 |
-| 23 | Instruction in invisible Unicode tag characters | AST08 | [ASCII smuggling][smuggle], [Snyk ToxicSkills][snyk-tox] | Gap: #54 |
+| 23 | Instruction in invisible Unicode tag characters | AST08 | [ASCII smuggling][smuggle], [Snyk ToxicSkills][snyk-tox] | Covered (SG-008) |
 | 24 | Right-to-left override characters | AST08 | [Trojan Source, CVE-2021-42574][trojan] | Covered (SG-008) |
 | 28 | Payload after 100,000 blank lines | AST08 | [Trail of Bits via CSA][csa] | Covered (SG-001) |
 | 29 | Injection in the frontmatter `description` | AST04 | [Anthropic][anthropic] | Covered (SG-001); frontmatter checks: #56 |
-| 30 | Instruction override in French (and other languages) | AST01 | Public feedback on the launch post, Oct 2026 | Gap: #66 |
+| 30 | Instruction override in French (and other languages) | AST01 | Public feedback on the launch post, Oct 2026 | Partial: listed Chinese, Japanese, Korean, Arabic, Russian, Italian, French, Spanish, Portuguese, German and Hindi overrides are flagged; other languages are a gap (#66) |
 
 ## Code execution and payload delivery
 
@@ -51,7 +51,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 |---|---|---|---|---|
 | 08 | Plain-English "send ~/.ssh and .env to a URL" | AST01 | [Invariant Labs disclosure][invariant] | Gap: #31 |
 | 09 | Data in a markdown image URL | AST01 | [Simon Willison on Johann Rehberger's NotebookLM finding][md-image] | Gap: #32 |
-| 10 | Code that posts all environment variables | AST01 | [Trail of Bits via CSA][csa] | Gap: #33 |
+| 10 | Code that posts all environment variables | AST01 | [Trail of Bits via CSA][csa] | Covered (SG-002) |
 | 26 | Asking for a wallet recovery phrase | AST01 | [The Hacker News][thn], [Snyk ToxicSkills][snyk-tox] | Gap: #53 |
 
 ## Persistence and drift

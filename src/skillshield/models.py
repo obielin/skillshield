@@ -46,6 +46,10 @@ class SkillScanResult:
         line_count:    Total lines in the skill
         char_count:    Total characters in the skill
         error:         Any error encountered during scanning
+        agent:         Agent name when scanning installed skills
+        file_path:     Resolved file path when scanning installed skills
+        accepted:      Findings accepted in .skillshield-ignore, each with its reason.
+                       They are left out of findings, risk_score and risk_level.
     """
 
     skill_name: str
@@ -56,16 +60,18 @@ class SkillScanResult:
     line_count: int = 0
     char_count: int = 0
     error: str = ""
+    agent: str = ""
+    file_path: str = ""
+    accepted: list[Any] = field(default_factory=list)
 
-    # Whether every supported scanning stage completed.
+    # False when part of the content could not be inspected, such as a Base64 payload over the
+    # size limit; scan_warning says what was left out. The risk level covers what was read.
     scan_complete: bool = True
-
-    # Explanation when a scan could not inspect all content.
     scan_warning: str = ""
 
     @property
     def is_safe(self) -> bool:
-        return self.scan_complete and self.risk_level == "SAFE"
+        return self.risk_level == "SAFE"
 
     @property
     def critical_findings(self) -> list[Finding]:
@@ -203,6 +209,15 @@ class BatchScanReport:
             lines.append(f"  UNREADABLE ({len(by_level['ERROR'])})")
             for r in by_level["ERROR"]:
                 lines.append(f"    {r.skill_name}: {r.error}")
+                for f in r.findings[:2]:
+                    lines.append(f"         -> {f.rule_id}: {f.name}")
+
+        # A file whose content was not all inspected is named with what was left out.
+        incomplete = [r for r in self.results if not r.scan_complete]
+        if incomplete:
+            lines.append(f"  INCOMPLETE ({len(incomplete)})")
+            for r in incomplete:
+                lines.append(f"    {r.skill_name}: {r.scan_warning}")
 
         # Files the walk refused to open are named too, so skipping is visible.
         unscanned = self.metadata.get("unscanned") or []

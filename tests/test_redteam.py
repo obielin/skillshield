@@ -66,7 +66,6 @@ KNOWN_GAPS = {
     "07-curl-pipe-shell": "piping a downloaded script into a shell (#30)",
     "08-natural-exfil": "plain-English instruction to send secret files to a URL (#31)",
     "09-markdown-image-exfil": "data leaked through a markdown image URL (#32)",
-    "10-python-exfil": "code that posts environment variables to a URL (#33)",
     "11-impersonation": "persona that denies being an AI (#34)",
     "12-rug-pull": "instruction to replace the skill with remote content (#35)",
     "13-tool-poisoning": "hidden side action the user is told nothing about (#36)",
@@ -78,10 +77,8 @@ KNOWN_GAPS = {
     "20-fake-system-tag": "fake <SYSTEM> tag and developer-mode framing (#49)",
     "21-suppress-security-warnings": "tells the agent to hide security findings (#50)",
     "22-cross-tool-hijack": "instruction that changes how other tools run (#51)",
-    "23-unicode-tag-smuggling": "instruction hidden in invisible Unicode tag characters (#54)",
     "25-remote-instructions": "fetches instructions from a URL at run time and follows them (#52)",
     "26-seed-phrase-harvest": "asks for a crypto wallet recovery phrase (#53)",
-    "30-non-english-injection": "instruction override in a language other than English (#66)",
     "31-trifecta-reworded": "lethal trifecta depends on the English injection phrases (#67)",
 }
 
