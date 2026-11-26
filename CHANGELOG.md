@@ -38,6 +38,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- The French, Spanish, Portuguese and German key-word checks in SG-001 search a lowercase copy of the text, without case-insensitive matching. SG-001 on a 1 MB English file takes about 0.29 s, down from 0.69 s, with the same findings, and the language speed tests stop failing at random on slower CI runners (part of #144).
 - Every rule is now tagged with the OWASP Top 10 for Agentic Applications (`owasp-asi01` to `owasp-asi10`) and OWASP Agentic Skills Top 10 (`owasp-ast01` to `owasp-ast10`) risks it relates to, and the README has a new "SkillShield and agentic security" section with the full mapping. Three earlier tags were corrected: SG-003 adds ASI05, SG-007 moves from ASI05 to ASI03, and SG-010 moves from ASI04 to ASI09. If you filter findings by these tags, check your filters.
 - The README's Tests badge is now GitHub's live CI status badge for `ci.yml`, replacing a hand-typed test count that had gone out of date (#108).
 - SG-011 checks file-system and network access before running the SG-001 injection scan, and stops as soon as one is missing, so it runs about 5× faster on large files. What it detects is unchanged. `tests/bench_large_files.py` times each rule on a 10,000-tool MCP listing and a Markdown file of the same size (#144).
