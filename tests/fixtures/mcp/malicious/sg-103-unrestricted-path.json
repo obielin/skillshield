@@ -1,0 +1,16 @@
+{
+  "serverInfo": {"name": "fs", "version": "1.0.0"},
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read a file from the filesystem.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "encoding": {"type": "string", "enum": ["utf-8"]}
+        }
+      }
+    }
+  ]
+}

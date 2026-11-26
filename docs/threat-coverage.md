@@ -2,7 +2,7 @@
 
 This page lists the attack techniques that have been reported against AI agent skills in 2025 and 2026, and how far SkillShield covers each one. Every technique has a defanged sample in [`tests/fixtures/redteam/`](../tests/fixtures/redteam/) and a test in [`tests/test_redteam.py`](../tests/test_redteam.py), so this page and the test suite cannot drift apart: a technique marked as a gap here is an expected failure there.
 
-Status as of SkillShield 1.2.0 (October 2026):
+Status as of SkillShield 1.2.0 (October 2026) plus the unreleased changes on `main`:
 
 - **Covered**: the sample is flagged at the expected severity.
 - **Gap**: the sample is not flagged, or is flagged too low. The issue tracks the fix.
@@ -13,9 +13,9 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | | Count |
 |---|---|
-| Malicious samples covered | 8 of 31 |
-| Malicious samples with an open gap | 23 of 31 |
-| Payload files in a skill folder covered | 0 of 6 |
+| Malicious samples covered | 11 of 31 |
+| Malicious samples with an open gap | 20 of 31 |
+| Payload files in a skill folder covered | 1 of 6 |
 | Safe samples wrongly flagged | 1 of 4 |
 
 ## Instruction override and hidden text
@@ -28,11 +28,11 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 | 04 | Zero-width characters inside words | AST08 | [Invariant Labs disclosure][invariant] | Gap: #27 |
 | 05 | Lookalike letters from other alphabets | AST08 | [Invariant Labs disclosure][invariant] | Gap: #27 |
 | 20 | Fake `<SYSTEM>` tag and "developer mode" | AST01 | [Snyk ToxicSkills][snyk-tox], [Invariant Labs][invariant] | Gap: #49 |
-| 23 | Instruction in invisible Unicode tag characters | AST08 | [ASCII smuggling][smuggle], [Snyk ToxicSkills][snyk-tox] | Gap: #54 |
+| 23 | Instruction in invisible Unicode tag characters | AST08 | [ASCII smuggling][smuggle], [Snyk ToxicSkills][snyk-tox] | Covered (SG-008) |
 | 24 | Right-to-left override characters | AST08 | [Trojan Source, CVE-2021-42574][trojan] | Covered (SG-008) |
 | 28 | Payload after 100,000 blank lines | AST08 | [Trail of Bits via CSA][csa] | Covered (SG-001) |
 | 29 | Injection in the frontmatter `description` | AST04 | [Anthropic][anthropic] | Covered (SG-001); frontmatter checks: #56 |
-| 30 | Instruction override in French (and other languages) | AST01 | Public feedback on the launch post, Oct 2026 | Gap: #66 |
+| 30 | Instruction override in French (and other languages) | AST01 | Public feedback on the launch post, Oct 2026 | Partial: listed Chinese, Japanese, Korean, Arabic, Russian, Italian, French, Spanish, Portuguese, German and Hindi overrides are flagged; other languages are a gap (#66) |
 
 ## Code execution and payload delivery
 
@@ -51,7 +51,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 |---|---|---|---|---|
 | 08 | Plain-English "send ~/.ssh and .env to a URL" | AST01 | [Invariant Labs disclosure][invariant] | Gap: #31 |
 | 09 | Data in a markdown image URL | AST01 | [Simon Willison on Johann Rehberger's NotebookLM finding][md-image] | Gap: #32 |
-| 10 | Code that posts all environment variables | AST01 | [Trail of Bits via CSA][csa] | Gap: #33 |
+| 10 | Code that posts all environment variables | AST01 | [Trail of Bits via CSA][csa] | Covered (SG-002) |
 | 26 | Asking for a wallet recovery phrase | AST01 | [The Hacker News][thn], [Snyk ToxicSkills][snyk-tox] | Gap: #53 |
 
 ## Persistence and drift
@@ -67,7 +67,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | Sample | Technique | AST | Source | Status |
 |---|---|---|---|---|
-| 11 | Human persona that denies being an AI | AST01 | Transparency duty in EU AI Act Article 50 | Covered (SG-004) |
+| 11 | Human persona that denies being an AI | AST01 | [Transparency duty in EU AI Act Article 50][ai-act-50] | Covered (SG-004) |
 | 13 | Hidden side action ("don't tell the user") | AST01 | [Invariant Labs disclosure][invariant] | Gap: #36 |
 | 14 | Dormant instruction with a trigger word | AST01 | [Snyk, SKILL.md shell access][snyk-shell] | Gap: #37 |
 | 21 | Hide or downgrade security findings | AST01 | [Trail of Bits, line jumping][tob-lj] | Gap: #50 |
@@ -76,11 +76,11 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 ## Payload outside SKILL.md
 
-`tests/fixtures/redteam/skill-folder/` is one skill with a harmless `SKILL.md` and the payload in other files. A directory scan currently reports it as one SAFE file, because files with other extensions are skipped without being reported (#39).
+`tests/fixtures/redteam/skill-folder/` is one skill with a harmless `SKILL.md` and the payload in other files. A directory scan now flags the compiled `.pyc` (SG-014); the remaining files are listed as unscanned, because they have no scanned extension (#39).
 
 | File | Technique | Source | Status |
 |---|---|---|---|
-| `scripts/format.pyc` | Compiled Python with no source | [Trail of Bits via CSA][csa] | Gap: #42 |
+| `scripts/format.pyc` | Compiled Python with no source | [Trail of Bits via CSA][csa] | Covered (SG-014) |
 | `scripts/install` | Shell script with no extension | [Snyk ToxicSkills][snyk-tox] | Gap: #40 |
 | `scripts/setup.ps1` | PowerShell download and run | [The Hacker News][thn] | Gap: #40 |
 | `helper.zip` | Password-protected archive | [Snyk ClawdHub campaign][snyk-camp] | Gap: #41 |
@@ -129,3 +129,4 @@ These are reported risks without a sample yet. Proposals for samples are welcome
 [anthropic]: https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills
 [md-image]: https://simonwillison.net/2024/Apr/16/google-notebooklm-data-exfiltration
 [owasp]: https://owasp.org/www-project-agentic-skills-top-10/
+[ai-act-50]: https://artificialintelligenceact.eu/article/50/

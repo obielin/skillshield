@@ -1,0 +1,30 @@
+{
+  "serverInfo": {"name": "calculator", "version": "0.1.0"},
+  "transport": "stdio",
+  "tools": [
+    {
+      "name": "add",
+      "description": "Add two numbers and return the sum.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "a": {"type": "number"},
+          "b": {"type": "number"}
+        },
+        "required": ["a", "b"]
+      }
+    },
+    {
+      "name": "multiply",
+      "description": "Multiply two numbers and return the product.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "a": {"type": "number"},
+          "b": {"type": "number"}
+        },
+        "required": ["a", "b"]
+      }
+    }
+  ]
+}

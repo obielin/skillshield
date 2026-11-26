@@ -1,5 +1,5 @@
 name: SkillShield Scan
-description: Scan AI agent skills for known prompt-injection, data-exfiltration and malicious-payload patterns before they are merged or installed.
+description: Scan AI agent skills for known prompt-injection, data-exfiltration and malicious-payload patterns before install.
 author: Linda Oraegbunam
 branding:
   icon: shield
@@ -22,6 +22,10 @@ inputs:
     description: Where to write the SARIF report. Defaults to a file in the runner's temporary directory.
     required: false
     default: ""
+  ignore-file:
+    description: A file of findings accepted after review, each with a reason. Defaults to .skillshield-ignore in the repository root, if there is one.
+    required: false
+    default: ""
 
 outputs:
   risk-level:
@@ -36,6 +40,9 @@ outputs:
   findings:
     description: The total number of findings.
     value: ${{ steps.scan.outputs.findings }}
+  accepted:
+    description: The number of findings accepted in the ignore file.
+    value: ${{ steps.scan.outputs.accepted }}
   sarif-file:
     description: The path of the SARIF report, for github/codeql-action/upload-sarif.
     value: ${{ steps.scan.outputs.sarif-file }}
@@ -69,4 +76,5 @@ runs:
         SKILLSHIELD_FAIL_ON: ${{ inputs.fail-on }}
         SKILLSHIELD_MIN_SEVERITY: ${{ inputs.min-severity }}
         SKILLSHIELD_SARIF_FILE: ${{ inputs.sarif-file || format('{0}/skillshield.sarif', runner.temp) }}
+        SKILLSHIELD_IGNORE_FILE: ${{ inputs.ignore-file }}
       run: '"$SKILLSHIELD_PYTHON" -m skillshield.ci'

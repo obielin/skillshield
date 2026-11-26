@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from skillshield.rules import Rule, Severity
+from skillshield.rules import RULE_COMPILED_PYTHON, Rule, Severity
 
 
 @dataclass
@@ -46,6 +46,10 @@ class SkillScanResult:
         line_count:    Total lines in the skill
         char_count:    Total characters in the skill
         error:         Any error encountered during scanning
+        agent:         Agent name when scanning installed skills
+        file_path:     Resolved file path when scanning installed skills
+        accepted:      Findings accepted in .skillshield-ignore, each with its reason.
+                       They are left out of findings, risk_score and risk_level.
     """
 
     skill_name: str
@@ -56,6 +60,9 @@ class SkillScanResult:
     line_count: int = 0
     char_count: int = 0
     error: str = ""
+    agent: str = ""
+    file_path: str = ""
+    accepted: list[Any] = field(default_factory=list)
 
     @property
     def is_safe(self) -> bool:
@@ -94,6 +101,21 @@ class SkillScanResult:
             f"score={self.risk_score:.0f}, "
             f"findings={self.finding_count})"
         )
+
+
+def missing_source_note(result: SkillScanResult) -> str:
+    """Say which compiled file in a result has no .py source beside it.
+
+    The compiled check carries the note as the finding snippet, which the
+    text and JSON output already print; the batch summary and SARIF need it
+    spelled out separately.
+    """
+    for finding in result.findings:
+        if finding.rule_id != RULE_COMPILED_PYTHON.id or not finding.snippets:
+            continue
+        if "(no matching " in finding.snippets[0]:
+            return finding.snippets[0]
+    return ""
 
 
 @dataclass
@@ -171,6 +193,9 @@ class BatchScanReport:
                     lines.append(f"    [{r.risk_score:.0f}] {r.skill_name}")
                     for f in r.findings[:2]:
                         lines.append(f"         -> {f.rule_id}: {f.name}")
+                    note = missing_source_note(r)
+                    if note:
+                        lines.append(f"         -> {note}")
                 if len(by_level.get(level, [])) > 5:
                     lines.append(f"    ... and {len(by_level[level]) - 5} more")
 
@@ -179,6 +204,15 @@ class BatchScanReport:
             lines.append(f"  UNREADABLE ({len(by_level['ERROR'])})")
             for r in by_level["ERROR"]:
                 lines.append(f"    {r.skill_name}: {r.error}")
+                for f in r.findings[:2]:
+                    lines.append(f"         -> {f.rule_id}: {f.name}")
+
+        # Files the walk refused to open are named too, so skipping is visible.
+        unscanned = self.metadata.get("unscanned") or []
+        if unscanned:
+            lines.append(f"  UNSCANNED ({len(unscanned)})")
+            for name in unscanned:
+                lines.append(f"    {name}")
 
         lines += ["=" * 64, ""]
         return "\n".join(lines)

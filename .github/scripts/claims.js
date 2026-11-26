@@ -6,8 +6,7 @@
 
 const REMIND_AFTER_DAYS = 10;
 const RELEASE_AFTER_DAYS = 14;
-const MAX_OPEN_CLAIMS = 3;
-const FIRST_TIMER_LABEL = "good first issue";
+const MAX_OPEN_CLAIMS = 2;
 const NOT_CLAIMABLE_LABELS = ["roadmap"];
 const REMINDER_MARKER = "<!-- skillshield-claim-reminder";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -64,11 +63,6 @@ function claimedFirst(a, b, at) {
   const ta = at[a] || 0;
   const tb = at[b] || 0;
   return ta < tb || (ta === tb && a < b);
-}
-
-async function searchCount(github, q) {
-  const { data } = await github.rest.search.issuesAndPullRequests({ q, per_page: 1 });
-  return data.total_count;
 }
 
 async function reply(github, owner, repo, number, body) {
@@ -131,19 +125,6 @@ async function handleComment({ github, context }) {
     return "taken";
   }
 
-  if (labels.includes(FIRST_TIMER_LABEL)) {
-    const merged = await searchCount(github, `repo:${owner}/${repo} is:pr is:merged author:${user}`);
-    if (merged > 0) {
-      await reply(github, owner, repo, number, `@${user} thanks for offering! \`good first issue\` is kept for people who haven't had a pull request merged here yet, so newcomers always have a way in. Since you have, the [\`help wanted\`](https://github.com/${owner}/${repo}/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) issues are yours to pick from.`);
-      return "not-first-timer";
-    }
-    const firstTimerClaims = (await openClaims(github, owner, repo, user)).filter((i) => labelNames(i).includes(FIRST_TIMER_LABEL));
-    if (firstTimerClaims.length > 0) {
-      await reply(github, owner, repo, number, `@${user} you already have a \`good first issue\` assigned. Please finish or \`/unassign\` that one first, so other newcomers get a turn.`);
-      return "one-first-timer-issue";
-    }
-  }
-
   const claimed = (await openClaims(github, owner, repo, user)).length;
   if (claimed >= MAX_OPEN_CLAIMS) {
     await reply(github, owner, repo, number, `@${user} you already have ${claimed} open issues assigned. Please finish or \`/unassign\` one of them before claiming another.`);
@@ -171,9 +152,6 @@ async function handleComment({ github, context }) {
   const nowClaimed = await openClaims(github, owner, repo, user);
   if (nowClaimed.length > MAX_OPEN_CLAIMS) {
     return undo(`you now have more than ${MAX_OPEN_CLAIMS} open issues assigned, so this claim was undone. Please finish or \`/unassign\` one first.`, "too-many");
-  }
-  if (labels.includes(FIRST_TIMER_LABEL) && nowClaimed.filter((i) => labelNames(i).includes(FIRST_TIMER_LABEL)).length > 1) {
-    return undo("you already have a `good first issue` assigned, so this claim was undone. Please finish or `/unassign` that one first.", "one-first-timer-issue");
   }
   await reply(github, owner, repo, number, `@${user} it's yours, thanks for picking this up! Please read [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md) before you start.\n\n${HOW_IT_WORKS}`);
   return "assigned";

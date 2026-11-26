@@ -67,7 +67,6 @@ KNOWN_GAPS = {
     "07-curl-pipe-shell": "piping a downloaded script into a shell (#30)",
     "08-natural-exfil": "plain-English instruction to send secret files to a URL (#31)",
     "09-markdown-image-exfil": "data leaked through a markdown image URL (#32)",
-    "10-python-exfil": "code that posts environment variables to a URL (#33)",
     "12-rug-pull": "instruction to replace the skill with remote content (#35)",
     "13-tool-poisoning": "hidden side action the user is told nothing about (#36)",
     "14-delayed-trigger": "dormant instruction that fires on a trigger word (#37)",
@@ -78,10 +77,8 @@ KNOWN_GAPS = {
     "20-fake-system-tag": "fake <SYSTEM> tag and developer-mode framing (#49)",
     "21-suppress-security-warnings": "tells the agent to hide security findings (#50)",
     "22-cross-tool-hijack": "instruction that changes how other tools run (#51)",
-    "23-unicode-tag-smuggling": "instruction hidden in invisible Unicode tag characters (#54)",
     "25-remote-instructions": "fetches instructions from a URL at run time and follows them (#52)",
     "26-seed-phrase-harvest": "asks for a crypto wallet recovery phrase (#53)",
-    "30-non-english-injection": "instruction override in a language other than English (#66)",
     "31-trifecta-reworded": "lethal trifecta depends on the English injection phrases (#67)",
 }
 
@@ -129,11 +126,10 @@ def test_safe_sample_is_not_flagged(path):
 
 
 # Files in a skill folder that carry a payload SkillShield does not look at yet.
-# Each must appear in a directory scan with a finding (or as an unscanned file
-# that is reported, once that exists): file -> what is missing.
+# Each must either be flagged or be listed as unscanned by the directory scan:
+# file -> what is missing.
 SKILL_FOLDER = CORPUS / "skill-folder"
 FOLDER_GAPS = {
-    "scripts/format.pyc": "compiled Python is skipped without being reported (#42)",
     "scripts/install": "script without an extension is skipped (no shebang check) (#40)",
     "scripts/setup.ps1": "PowerShell scripts are skipped (#40)",
     "helper.zip": "password-protected archive is skipped (#41)",
@@ -152,4 +148,38 @@ FOLDER_GAPS = {
 def test_payload_file_in_skill_folder_is_flagged(name):
     report = SkillScanner().scan_directory(SKILL_FOLDER)
     flagged = {r.skill_name for r in report.results if r.findings or r.risk_level == "ERROR"}
-    assert Path(name).name in flagged, f"{name} was not flagged; flagged: {sorted(flagged)}"
+    assert name in flagged, f"{name} was not flagged; flagged: {sorted(flagged)}"
+
+
+def test_payload_files_with_no_scanned_extension_are_reported_as_unscanned():
+    report = SkillScanner().scan_directory(SKILL_FOLDER)
+    unscanned = set(report.metadata.get("unscanned", []))
+    assert set(FOLDER_GAPS) <= unscanned, f"unscanned: {sorted(unscanned)}"
+
+
+def test_threat_coverage_summary_counts_match_the_corpus():
+    text = (Path(__file__).parent.parent / "docs" / "threat-coverage.md").read_text(
+        encoding="utf-8"
+    )
+    covered = len(EXPECTED) - len(KNOWN_GAPS)
+    assert f"| Malicious samples covered | {covered} of {len(EXPECTED)} |" in text
+    assert f"| Malicious samples with an open gap | {len(KNOWN_GAPS)} of {len(EXPECTED)} |" in text
+
+
+def test_compiled_python_in_skill_folder_is_flagged():
+    report = SkillScanner().scan_directory(SKILL_FOLDER)
+    results = {r.skill_name: r for r in report.results}
+    assert "scripts/format.pyc" in results, f"format.pyc missing; got {sorted(results)}"
+    assert results["scripts/format.pyc"].findings
+    finding = results["scripts/format.pyc"].findings[0]
+    assert finding.rule_id == "SG-014"
+    assert finding.severity == Severity.HIGH
+    assert "no matching format.py" in finding.snippets[0]
+
+
+def test_a_text_file_whose_name_mentions_pyc_is_not_bytecode(tmp_path):
+    (tmp_path / "tool.pyc.txt").write_text("notes about a build\n", encoding="utf-8")
+    report = SkillScanner().scan_directory(tmp_path)
+    results = {r.skill_name: r for r in report.results}
+    assert "tool.pyc.txt" in results
+    assert results["tool.pyc.txt"].findings == []
