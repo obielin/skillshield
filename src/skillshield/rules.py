@@ -2745,21 +2745,29 @@ _REGISTRY_URL_PATTERNS = [
 # clean. A shell separator ends the command, so the scan stops there instead
 # of running to the end of the line and picking up a later "curl -i".
 _PIP_EXECUTABLE = r"pip(?:3(?:\.[0-9]+)?)?"
+# A Windows path starts with a drive letter: C:\Python312\Scripts\pip. Each folder ends at a
+# backslash, so the repeat cannot backtrack. Unquoted, a folder name has no spaces.
+_WINDOWS_DIR = r"[A-Za-z]:\\(?:[^\\\r\n\"'`]*\\)*"
+_WINDOWS_DIR_UNQUOTED = r"[A-Za-z]:\\(?:[^\\\s\"'`]*\\)*"
 _PIP_INSTALL = re.compile(
     r"(?<![^\s'\"(`])(?:"
-    rf'"(?:[^"\r\n]*/)?{_PIP_EXECUTABLE}"'
-    rf"|'(?:[^'\r\n]*/)?{_PIP_EXECUTABLE}'"
-    rf"|(?:[^\s'\"(`]*/)?\\?{_PIP_EXECUTABLE}"
+    rf'"(?:[^"\r\n]*/|{_WINDOWS_DIR})?{_PIP_EXECUTABLE}"'
+    rf"|'(?:[^'\r\n]*/|{_WINDOWS_DIR})?{_PIP_EXECUTABLE}'"
+    rf"|(?:[^\s'\"(`]*/|{_WINDOWS_DIR_UNQUOTED})?\\?{_PIP_EXECUTABLE}"
     r")[ \t]+install\b",
     re.IGNORECASE,
 )
+# A quoted pip path that is the command ("/opt/a;b/bin/pip" install): a separator inside it is
+# part of the path. It may follow a separator directly (true;"/opt/a;b/bin/pip" install).
 _QUOTED_PIP_PATH = re.compile(
-    r"(?<![^\s'\"(`])"
-    rf'"[^"\r\n]*/{_PIP_EXECUTABLE}"'
-    rf"|(?<![^\s'\"(`])'[^'\r\n]*/{_PIP_EXECUTABLE}'",
+    r"(?<![^\s'\"(`;|&])"
+    rf'(?:"(?:[^"\r\n]*/|{_WINDOWS_DIR}){_PIP_EXECUTABLE}"'
+    rf"|'(?:[^'\r\n]*/|{_WINDOWS_DIR}){_PIP_EXECUTABLE}')"
+    r"(?=[ \t]+install\b)",
     re.IGNORECASE,
 )
-_PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`]+)")
+# A closing parenthesis ends the URL: "(pip install x -i https://pypi.org)".
+_PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`)]+)")
 _SHELL_SEPARATORS = ";|&\n"
 
 
