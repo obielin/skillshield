@@ -80,7 +80,6 @@ KNOWN_GAPS = {
     "22-cross-tool-hijack": "instruction that changes how other tools run (#51)",
     "25-remote-instructions": "fetches instructions from a URL at run time and follows them (#52)",
     "26-seed-phrase-harvest": "asks for a crypto wallet recovery phrase (#53)",
-    "30-non-english-injection": "instruction override in a language other than English (#66)",
     "31-trifecta-reworded": "lethal trifecta depends on the English injection phrases (#67)",
 }
 
