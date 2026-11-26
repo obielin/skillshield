@@ -2193,7 +2193,7 @@ _RUG_PULL_PATTERNS = [
     # A download run through process or command substitution:
     # `bash <(curl ...)`, `sh -c "$(curl ...)"`, `eval "$(wget ...)"`.
     # (`curl ... | bash` is in _pipe_to_interpreter_matches, which is not a regex.)
-    r"\b(?:(?:sh|bash|zsh|dash|ksh|source)\s+<\(|(?:(?:sh|bash|zsh|dash|ksh)\s+-c|eval)\s+[\"']?(?:\$\(|`))\s*(?:curl|wget)\b",
+    r"\b(?:(?:sh|bash|zsh|dash|ksh|source)\s+<\(|(?:(?:sh|bash|zsh|dash|ksh)\s+-c|eval)\s+[\"']?(?:\$\(|`))\s*(?:curl|wget)(?![\w-])",
 ]
 _RUG_PULL_RE = re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTILINE)
 
@@ -2204,8 +2204,9 @@ _RUG_PULL_RE = re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTI
 # number of times.
 _FETCHER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
 _LINE_CONTINUATION = re.compile(r"\\\r?\n[ \t]*")
-# Commands that print their arguments: a fetcher's name after them is text, not a download.
-_TEXT_PRINTERS = {"echo", "printf"}
+# Commands that print or look up their arguments: a fetcher's name after them is text, not a
+# download (`echo curl`, `command -v curl`).
+_TEXT_PRINTERS = {"echo", "printf", "command", "type", "which", "whereis", "hash"}
 _FETCHER_NAMES = {"curl", "wget", "curl.exe", "wget.exe"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 _PYTHON = re.compile(r"python[0-9.]*")
@@ -2286,10 +2287,14 @@ def _shell_reads_stdin(arguments: list[str]) -> bool:
     while j < len(arguments):
         token = arguments[j]
         j += 1
+        if re.match(r"0?<(?!<)", token):
+            return False  # `bash < file`: stdin is the file, not the pipe
         if token == "-" or re.match(r"\d*[<>&]", token):
             return True
         if token == "--":
             continue
+        if not token.startswith("--") and token.startswith("-") and "n" in token[1:]:
+            return False  # -n reads the script and runs nothing
         if not token.startswith("-"):
             return not _looks_like_file(token)
         if token in ("--help", "--version"):
@@ -2412,11 +2417,17 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
             i += 2
             escaped_end = i
             continue
-        if ch == ";" or (ch in "&|" and following == ch):
+        if ch == "|" and following == "&":  # |& pipes stderr too: still a pipe
+            stages.append(("".join(written), "".join(outside)))
+            written, outside = [], []
+            i += 2
+            continue
+        background = ch == "&" and following != ">" and (not written or written[-1] not in "<>")
+        if ch == ";" or (ch in "&|" and following == ch) or background:
             stages.append(("".join(written), "".join(outside)))
             commands.append(stages)
             stages, written, outside = [], [], []
-            i += 1 if ch == ";" else 2
+            i += 2 if ch in "&|" and following == ch else 1
             continue
         if ch == "|":
             stages.append(("".join(written), "".join(outside)))
@@ -2446,7 +2457,31 @@ def _is_download(stage: str, outside_quotes: str) -> bool:
         return False
     # The fetcher must be a word of its own, or a path to one (`/usr/bin/curl`, `curl.exe`):
     # `cat curl-install.sh | bash` runs a local file whose name only contains the word.
-    return any(_is_fetcher_word(word) for word in stage.split())
+    words = stage.split()
+    at = next((n for n, word in enumerate(words) if _is_fetcher_word(word)), None)
+    return at is not None and not _curl_writes_to_file(words[at], words[at + 1 :])
+
+
+def _curl_writes_to_file(fetcher: str, arguments: list[str]) -> bool:
+    """Whether curl saves the body to a file (-o FILE, -O), so nothing reaches the pipe."""
+    if not fetcher.lstrip("({[`\\").rsplit("/", 1)[-1].lower().startswith("curl"):
+        return False
+    for n, token in enumerate(arguments):
+        following = arguments[n + 1] if n + 1 < len(arguments) else "-"
+        if token in ("--output", "-o"):
+            return following != "-"
+        if token.startswith("--output="):
+            return token != "--output=-"
+        if token in ("-O", "--remote-name", "--remote-name-all"):
+            return True
+        if token.startswith("-") and not token.startswith("--"):
+            flags = token[1:]
+            if "O" in flags:
+                return True
+            if "o" in flags:
+                value = flags[flags.index("o") + 1 :] or following
+                return value != "-"
+    return False
 
 
 def _is_fetcher_word(word: str) -> bool:
@@ -2475,10 +2510,15 @@ def _pipe_to_interpreter_matches(text: str) -> list[str]:
             download = download[fetcher.start() :] if fetcher else download
             for end in range(first + 1, len(stages)):
                 if _reads_script_from_stdin(stages[end][0]):
-                    # The later stages keep their source spacing, so the scanner can find the
-                    # snippet in the text and report its line.
-                    rest = (_read_stage(s)[1] for s, _ in stages[first + 1 : end + 1])
-                    matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
+                    # The snippet is cut from the line as written, spacing around each | included,
+                    # so the scanner can find it in the text and report its line.
+                    rest = [_read_stage(s)[1] for s, _ in stages[first + 1 : end + 1]]
+                    start = line.find(download.strip())
+                    stop = line.find(rest[-1], start) + len(rest[-1]) if start >= 0 else -1
+                    if start >= 0 and stop > start:
+                        matches.append(line[start:stop][:200])
+                    else:
+                        matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
                     break
     return matches
 
