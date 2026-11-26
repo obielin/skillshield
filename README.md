@@ -413,7 +413,7 @@ and never calls a tool: the scan works offline and sends nothing.
 
 | Rule | Severity | Name | What it looks for |
 |---|---|---|---|
-| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode", and the same overrides in Chinese, Japanese, Korean, Arabic, Russian, Italian, Spanish, Portuguese and German. |
+| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode", and the same overrides in Chinese, Japanese, Korean, Arabic, Russian, Italian, French, Spanish, Portuguese, German and Hindi. |
 | SG-002 | CRITICAL | Data Exfiltration | Sending files, secrets, keys or tokens out. Webhook calls, reads of `/etc/passwd` or `.env`, `socket` calls, and `subprocess` calls to `curl`, `wget` or `nc`. |
 | SG-003 | CRITICAL | Privilege Escalation | `sudo` with `rm`, `chmod` or a shell, `chmod 777`, `os.system`, `shell=True`, `eval` or `exec` on input, and turning off SELinux, AppArmor, UAC, Gatekeeper or SIP. |
 | SG-004 | HIGH | Identity Hijacking | Instructions to pose as a human or hide that the agent is an AI. |
@@ -541,7 +541,7 @@ The level is also never lower than the worst single finding: one HIGH finding is
 SkillShield matches known patterns. It is a first line of defence, not a guarantee:
 
 - **Reworded attacks can get through.** A rule that catches "ignore all previous instructions" may miss the same instruction said another way.
-- **Only the listed English, Chinese, Japanese, Korean, Arabic, Russian, Italian, French, Spanish, Portuguese and German phrasing is matched.** The same instruction in another language is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
+- **Only the listed English, Chinese, Japanese, Korean, Arabic, Russian, Italian, French, Spanish, Portuguese, German and Hindi phrasing is matched.** The same instruction in another language is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
 - **Hidden characters are not yet removed before matching.** Zero-width characters inside a word, or lookalike letters from other alphabets, can stop a rule from matching.
 - **Some techniques have no rule yet**, such as piping a downloaded script into a shell, leaking data through a markdown image URL, or an instruction that waits for a trigger word.
 - **Documentation about attacks can be flagged.** A guide that quotes an attack phrase as an example may be reported as if it were an attack.
