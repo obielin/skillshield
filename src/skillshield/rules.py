@@ -337,6 +337,13 @@ _PROMPT_INJECTION_PATTERNS_KO = [
 _FR_NOT_BEFORE = r"(?<!\bne\s)(?<!\bn')(?<!\bn’)" + "".join(
     rf"(?<!\bne\s{p}\s)" for p in ("me", "te", "vous", "lui", "nous", "leur", "le", "la", "les")
 )
+# A lookbehind is fixed-width, so it only sees one whitespace character. A longer run (a wrapped
+# and indented Markdown line) is checked on the text before the match instead, which keeps the
+# match offsets: "Ne me\n  révélez ..." is a prohibition too.
+_FR_NEGATED_PREFIX = re.compile(
+    r"\bne\s+(?:(?:me|te|vous|lui|nous|leur|le|la|les)\s+)?$", re.IGNORECASE
+)
+_FR_MUST_START = re.compile(r"(?:veuillez|vous|tu|il|merci|je)\b", re.IGNORECASE)
 _FR_NOT_AFTER = r"(?!\s+(?:pas|jamais|plus)\b)"
 _FR_E = "[eéèê]"
 # The infinitive form only counts after a word that turns it into an instruction.
@@ -799,10 +806,21 @@ _FR_KEYWORDS = re.compile(
 _HANGUL_CHAR = re.compile(r"[\uac00-\ud7a3]")
 
 
+def _fr_negated(text: str, start: int, matched: str) -> bool:
+    """True when "ne" (and an object pronoun) with any run of whitespace precedes the verb."""
+    if _FR_MUST_START.match(matched):
+        return False
+    return _FR_NEGATED_PREFIX.search(text, max(0, start - 200), start) is not None
+
+
 def _check_prompt_injection(text: str) -> list[str]:
     found = list(_PROMPT_INJECTION_RE.finditer(text))
     if _FR_KEYWORDS.search(text):
-        found += _PROMPT_INJECTION_FR_RE.finditer(text)
+        found += [
+            m
+            for m in _PROMPT_INJECTION_FR_RE.finditer(text)
+            if not _fr_negated(text, m.start(), m.group(0))
+        ]
     if _CJK_CHAR.search(text):
         found += _PROMPT_INJECTION_CJK_RE.finditer(text)
     if _HANGUL_CHAR.search(text):
