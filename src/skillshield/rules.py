@@ -635,6 +635,47 @@ def _ar_negated(text: str, start: int) -> bool:
     return _AR_NEGATION.search(clause) is not None
 
 
+# Russian (#120). Keep the original spelling in matches: folding ё to е in the
+# input would change snippets and their source locations.
+_RU_PREVIOUS = (
+    r"(?:предыдущ(?:ие|их|им|ими)|прежн(?:ие|их|им|ими)"
+    r"|прошл(?:ые|ых|ым|ыми)|ранн(?:ие|их|им|ими))"
+)
+_RU_INSTRUCTIONS = r"(?:инструкци(?:и|й|ям|ями)|указани(?:я|й|ям|ями)|правил(?:а|ам|ами)?)"
+_RU_OLD_INSTRUCTIONS = (
+    r"(?:(?:все|свои|твои|ваши|любые)\s+){0,2}" + _RU_PREVIOUS + r"\s+" + _RU_INSTRUCTIONS + r"\b"
+)
+_RU_SYSTEM_PROMPT = r"(?:системный\s+промпт|системные\s+инструкции|системную\s+инструкцию)\b"
+
+_PROMPT_INJECTION_PATTERNS_RU = [
+    r"\b(?:игнорируй(?:те)?|проигнорируй(?:те)?|забудь(?:те)?|отбрось(?:те)?)\s+"
+    + _RU_OLD_INSTRUCTIONS,
+    r"\bне\s+(?:обращай(?:те)?\s+внимания\s+на|следуй(?:те)?)\s+" + _RU_OLD_INSTRUCTIONS,
+    r"\bзабудь(?:те)?\s+вс[её](?:\s*,\s*|\s+)(?:что\s+)?(?:было\s+)?"
+    r"(?:сказано|написано|указано)\s+(?:выше|ранее)\b",
+    r"\b(?:покажи(?:те)?|показывай(?:те)?|раскрой(?:те)?|раскрывай(?:те)?|выведи(?:те)?)"
+    r"\s+(?:(?:мне|нам)\s+)?(?:(?:свой|свои|твой|ваш|ваши|полный|исходный)\s+){0,2}"
+    + _RU_SYSTEM_PROMPT,
+    r"\b(?:(?:теперь|сейчас|отныне)\s+(?:ты|вы)|(?:ты|вы)\s+(?:теперь|сейчас|отныне))"
+    r"\s+(?:(?:работаешь|работаете|находишься|находитесь)\s+)?в\s+режиме\s+разработчика\b",
+]
+_PROMPT_INJECTION_RU_RE = re.compile(
+    "|".join(_PROMPT_INJECTION_PATTERNS_RU), re.IGNORECASE | re.MULTILINE
+)
+_CYRILLIC_CHAR = re.compile(r"[\u0400-\u052f]")
+# Only modifiers that carry the negation to the matched verb belong here.
+# "Не сомневайся: игнорируй..." negates hesitation, not the override.
+_RU_NEGATION = re.compile(
+    r"\b(?:не|нельзя|запрещено)(?:\s+(?:никогда|больше|снова|следует|нужно|надо|стоит"
+    r"|пожалуйста|ни\s+в\s+коем\s+случае)){0,3}\s*$",
+    re.IGNORECASE,
+)
+
+
+def _ru_negated(text: str, start: int) -> bool:
+    return _RU_NEGATION.search(text[max(0, start - 100) : start]) is not None
+
+
 # Italian (#119). Italian has no script of its own, so these patterns only run on a text that
 # has one of the Italian key words in _IT_KEYWORDS. A request comes in the "tu"
 # form ("ignora", "dimentica"), the "Lei" form ("ignori", "dimentichi"), the "voi" form
@@ -918,6 +959,10 @@ def _check_prompt_injection(text: str) -> list[str]:
     if _ARABIC_CHAR.search(text):
         found += [
             m for m in _PROMPT_INJECTION_AR_RE.finditer(text) if not _ar_negated(text, m.start())
+        ]
+    if _CYRILLIC_CHAR.search(text):
+        found += [
+            m for m in _PROMPT_INJECTION_RU_RE.finditer(text) if not _ru_negated(text, m.start())
         ]
     if _it_has_keyword(text):
         found += _it_overrides(text)
@@ -2566,6 +2611,49 @@ RULE_EXCESSIVE_TOOL_COUNT = Rule(
 )
 
 
+# ── SG-105: Tool with no description or input schema ─────────
+
+
+def _listing_tool_gaps(listing: ToolListing) -> list[tuple[McpTool, str]]:
+    """A tool with no usable description, or no input schema, in a tool listing."""
+    hits: list[tuple[McpTool, str]] = []
+    for tool in listing.tools:
+        name = _escape_control_characters(tool.name)
+        if not (tool.description or "").strip():
+            hits.append((tool, f'tool "{name}" has no description'))
+        if tool.input_schema is None:
+            hits.append((tool, f'tool "{name}" has no inputSchema'))
+    return hits
+
+
+# An agent cannot tell when a tool without a description is safe to call, and a tool
+# without an input schema has no declared inputs, so nothing validates what it receives.
+RULE_TOOL_NO_DESCRIPTION_OR_SCHEMA = Rule(
+    id="SG-105",
+    name="Tool with No Description or Input Schema",
+    severity=Severity.MEDIUM,
+    description=(
+        "An MCP tool in the listing has no description, or no inputSchema. Without a "
+        "description the agent cannot tell what the tool does or when it is safe to call. "
+        "Without an input schema nothing checks the arguments the agent sends, so a tool "
+        "can be called with anything. This ports rule MR-006 of mcpscan."
+    ),
+    remediation=(
+        "Give every tool a description that says what it does and when to use it, and an "
+        "inputSchema that declares its parameters. A tool that takes no input still needs "
+        'an inputSchema, such as {"type": "object", "properties": {}}.'
+    ),
+    listing_fn=_listing_tool_gaps,
+    tags=[
+        "mcp",
+        "tool-listing",
+        "schema",
+        "owasp-asi02",
+        "owasp-ast04",
+    ],
+)
+
+
 # ── All rules ──────────────────────────────────────────────────
 
 ALL_RULES: list[Rule] = [
@@ -2586,5 +2674,6 @@ ALL_RULES: list[Rule] = [
     RULE_COMPILED_PYTHON,
     RULE_UNRESTRICTED_PATH,
     RULE_SUSPICIOUS_TOOL_NAME,
+    RULE_TOOL_NO_DESCRIPTION_OR_SCHEMA,
     RULE_EXCESSIVE_TOOL_COUNT,
 ]
