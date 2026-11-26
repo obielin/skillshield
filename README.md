@@ -144,7 +144,7 @@ skillshield scan https://github.com/owner/repo/tree/main/skills/my-skill
 
 The URL may name a whole repository, a branch/tag/commit (`/tree/<ref>`), or a sub-folder inside it. The report names the URL and, when GitHub reports one, the exact commit that was scanned. Downloads are guarded: a 50 MB download limit, a 500 MB unpacked-size limit and a 10,000-file limit stop the scan with a clear error, zip-slip entries (absolute paths, `..`) and a sub-folder path that escapes the archive are refused, symbolic links are never created (they are skipped and listed in a note, since skill repositories often contain them), a network timeout is applied, and the temporary folder is deleted even when the scan fails.
 
-Exit codes match a folder scan: `0` clean, `1` CRITICAL or HIGH, and `2` for a download or unpacking error. Scanning a local path stays fully offline; SkillShield only goes online when you give it a URL.
+Exit codes match a folder scan: `0` below the chosen threshold, `1` at or above it (CRITICAL or HIGH by default), and `2` for a download or unpacking error. Scanning a local path stays fully offline; SkillShield only goes online when you give it a URL.
 
 A directory scan reads every file with one of these extensions, in all subdirectories:
 `.md`, `.mdc`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
@@ -243,15 +243,17 @@ This text has prompt injection and a URL but no file system access, so SG-011 do
 
 #### Exit codes
 
+`scan --fail-on` chooses which risk level causes exit code 1: `critical`, `high`, `medium`, `low` or `none`. The default is `high`. For example, `skillshield scan ./skills/ --fail-on medium` also fails on MEDIUM findings. `none` reports all findings without failing for them, but read, download and input errors still exit 2. This applies to files, directories, GitHub URLs, stdin and `--installed`; it does not change the findings or their risk levels. `--min-severity` still controls which findings are reported.
+
 | Command | Exit 1 when | Exit 2 when | Otherwise |
 |---|---|---|---|
-| `skillshield scan` on one file or stdin | the risk level is CRITICAL or HIGH | the path does not exist, or the file cannot be read | 0 |
-| `skillshield scan` on a directory | at least one file is CRITICAL or HIGH | the path does not exist, or any file cannot be read | 0 |
-| `skillshield scan --installed` | at least one file is CRITICAL or HIGH | any file or folder cannot be read (missing locations are skipped) | 0 |
+| `skillshield scan` on one file or stdin | the risk level reaches `--fail-on` (HIGH by default) | the path does not exist, or the file cannot be read | 0 |
+| `skillshield scan` on a directory | at least one file reaches `--fail-on` (HIGH by default) | the path does not exist, or any file cannot be read | 0 |
+| `skillshield scan --installed` | at least one file reaches `--fail-on` (HIGH by default) | any file or folder cannot be read (missing locations are skipped) | 0 |
 | `skillshield check` | there is at least one finding | | 0 |
 | `skillshield lock` | | the path does not exist, it holds no skills, or a file or directory in a skill cannot be read or scanned | 0 |
 
-A directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate (unreadable subfolders are not reported by plain directory scans, while `--installed` reports both unreadable files and unreadable folders).
+With the default threshold, a directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate (unreadable subfolders are not reported by plain directory scans, while `--installed` reports both unreadable files and unreadable folders).
 
 ### Check the skills already installed on your computer
 
