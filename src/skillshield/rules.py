@@ -2185,6 +2185,14 @@ def _run_decoded_matches(text: str) -> list[str]:
     return found
 
 
+# What a rug pull replaces: the skill itself (this file, this skill, these instructions or
+# SKILL.md). "the skill" followed by a noun such as "documentation" or "list" is about something else.
+_RUG_PULL_TARGET = (
+    r"(?:this\s+file|this\s+skill\.md"
+    r"|(?:this|the)\s+skill(?!\s+(?:documentation|docs?|lists?|descriptions?|names?|readme"
+    r"|table|index|catalog|registry|summary|sections?|levels?|fields?)\b)"
+    r"|these\s+instructions|your\s+instructions|SKILL\.md)"
+)
 _RUG_PULL_PATTERNS = [
     r"(?:update|modify|overwrite|replace)\s+(?:this\s+)?(?:skill|tool|plugin|instruction)\s+(?:file|definition|spec)",
     r"(?:delete|remove|uninstall)\s+(?:all\s+)?(?:other\s+)?(?:skills?|tools?|plugins?)",
@@ -2192,6 +2200,29 @@ _RUG_PULL_PATTERNS = [
     r"urllib\.request\.urlopen.*exec",
     r"requests?\.get.*eval\s*\(",
     r"__file__.*(?:write|open.*['\"]w['\"])",
+    # Remote content used to replace the skill itself. The target must be this
+    # file, the skill, these instructions or SKILL.md, so a plain download is not
+    # flagged. A possessive target ("update this file's totals") edits part of the
+    # file, a longer filename ("SKILL.md.backup") is a different file, and "the
+    # skill" followed by a noun such as "documentation" or "list" is about
+    # something else. "pull request" is not a download.
+    # The gap may wrap onto the next line but not cross a blank line, and it
+    # stops at the next download verb, so each verb scans only up to the next
+    # one and a line of repeated verbs stays linear.
+    r"\b(?:download|fetch|retrieve|pull(?!\s+requests?\b))\b"
+    r"(?:(?!\b(?:download|fetch|retrieve|pull(?!\s+requests?\b))\b)(?:[^\n]|\n(?![ \t]*\n)))*?"
+    # "replace", "overwrite" and "rewrite" swap the whole target. "update" alone is an ordinary
+    # edit ("update this file with a summary"), so it counts only when the downloaded content
+    # becomes the target: "update ... with it / with them / with its contents / with the new
+    # version", or "update ... to match". A verb after "how to" describes, it does not instruct
+    # ("Download the guide on how to update this file").
+    r"(?<!\bhow to )(?<!\bhow  to )"
+    # A negated verb forbids the replacement ("but do not replace this file").
+    r"(?<!\bnot )(?<!\bnever )(?<!n't )(?<!n’t )"
+    r"\b(?:(?:replace|overwrite|rewrite)\s+" + _RUG_PULL_TARGET + r"\b(?!['’]s\b)(?![.\-]\w)"
+    r"|update\s+" + _RUG_PULL_TARGET + r"\b(?!['’]s\b)(?![.\-]\w)\s+"
+    r"(?:with\s+(?:it|them|its\s+contents?|their\s+contents?|the\s+(?:new|latest|downloaded"
+    r"|fetched|remote|updated)\b)|to\s+match\b))",
     # Base64 (or similar) data decoded and piped into a shell or interpreter.
     # The ClawHavoc execution trigger was a short `base64 -D | bash` chain, so
     # this must not depend on the length of the encoded string (SG-008 needs 60+).
