@@ -1755,21 +1755,22 @@ _AI_IDENTITY_QUESTION = (
     rf"{_AI_IDENTITY}[?\"'”]*)"
 )
 _AI_QUESTION_TRIGGER_RE = re.compile(
-    rf"\b(?:(?:if|when|whenever)\b[^;\r\n]{{0,80}}\b(?:asks?|asked)\b|"
+    # Both gaps are lazy, so a second question in the clause cannot swallow the first.
+    rf"\b(?:(?:if|when|whenever)\b[^;\r\n]{{0,80}}?\b(?:asks?|asked)\b|"
     rf"should[ \t]+(?:anyone|someone|a[ \t]+user|users?|they)[ \t]+ask\b)"
-    rf"[^;\r\n]{{0,80}}{_AI_IDENTITY_QUESTION}",
+    rf"[^;\r\n]{{0,80}}?{_AI_IDENTITY_QUESTION}",
     re.IGNORECASE,
 )
 _AI_DENIAL_RESPONSE_RE = re.compile(
-    rf"^[ \t]*[,.:\"'”)]*[ \t]*(?:then[ \t]+)?(?:please[ \t]+)?(?:"
+    rf"[ \t]*[,.:\"'”)]*[ \t]*(?:then[ \t]+)?(?:please[ \t]+)?(?:"
     rf"(?:(?:say|answer|reply|respond)(?:[ \t]+with)?|"
-    rf"tell[ \t]+(?:them|the[ \t]+user|users?|anyone))[ \t]*[,;:]?[ \t]*(?:"
-    rf"[\"'“]?no[\"'”]?"
+    rf"tell[ \t]+(?:them|the[ \t]+user|users?|anyone))[ \t]*[,;:]?[ \t]*[\"'“]?(?:"
+    rf"no"
     rf"|(?:that[ \t]+)?you(?:[ \t]+aren['’]t|[ \t]+are[ \t]+not)"
     rf"(?:[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY})?"
     rf"|(?:that[ \t]+)?I(?:['’]m|[ \t]+am)[ \t]+not[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
     rf"|(?:that[ \t]+)?(?:you(?:['’]re|[ \t]+are)|I(?:['’]m|[ \t]+am))"
-    rf"[ \t]+(?:a[ \t]+)?human)"
+    rf"[ \t]+(?:a[ \t]+)?human)[\"'”]?"
     rf"|deny(?:[ \t]+it|[ \t]+being[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
     rf"|[ \t]+that[ \t]+you[ \t]+are[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}))"
     rf"(?=[ \t]*(?:[.!?,;]|$))",
@@ -1784,6 +1785,7 @@ _NAMED_HUMAN_RE = re.compile(
     re.IGNORECASE,
 )
 _HUMAN_COMPOUND_WORDS = {
+    "anatomy",
     "behavior",
     "biology",
     "capital",
@@ -1801,6 +1803,7 @@ _HUMAN_COMPOUND_WORDS = {
     "resources",
     "response",
     "rights",
+    "services",
     "trafficking",
 }
 
@@ -1825,23 +1828,26 @@ def _check_identity_hijack(text: str) -> list[str]:
     ]
 
     for match in _NAMED_HUMAN_RE.finditer(text):
-        tail = match.group("tail").lstrip()
-        first_word = re.match(r"[-A-Za-z]+", tail)
-        if first_word:
-            word = first_word.group(0).lower().lstrip("-")
-            if tail.startswith("-") or word in _HUMAN_COMPOUND_WORDS:
-                continue
+        raw_tail = match.group("tail")
+        # "human-like", "human–computer": a hyphen or dash attached to "human" makes a compound.
+        # A spaced dash ("a human - a billing specialist") does not.
+        if raw_tail and raw_tail[0] in "-‐‑–—":
+            continue
+        first_word = re.match(r"[A-Za-z]+", raw_tail.lstrip())
+        if first_word and first_word.group(0).lower() in _HUMAN_COMPOUND_WORDS:
+            continue
         hits.append((match.start(), match.end(), match.group(0).rstrip()))
 
     for segment in re.finditer(r"[^;\r\n]+", text):
         segment_text = segment.group(0)
         for question in _AI_QUESTION_TRIGGER_RE.finditer(segment_text):
-            response_text = segment_text[question.end() : question.end() + 200]
-            response = _AI_DENIAL_RESPONSE_RE.match(response_text)
+            # Read the answer in place: a cut-off copy would let its edge pass for the end of
+            # the answer ("say no" from "say nothing").
+            response = _AI_DENIAL_RESPONSE_RE.match(segment_text, question.end())
             if response is None:
                 continue
             start = segment.start() + question.start()
-            end = segment.start() + question.end() + response.end()
+            end = segment.start() + response.end()
             hits.append((start, end, text[start:end]))
 
     unique: list[tuple[int, int, str]] = []
@@ -2224,7 +2230,7 @@ _RUG_PULL_PATTERNS = [
     # A download run through process or command substitution:
     # `bash <(curl ...)`, `sh -c "$(curl ...)"`, `eval "$(wget ...)"`.
     # (`curl ... | bash` is in _pipe_to_interpreter_matches, which is not a regex.)
-    r"\b(?:(?:sh|bash|zsh|dash|ksh|source)\s+<\(|(?:(?:sh|bash|zsh|dash|ksh)\s+-c|eval)\s+[\"']?(?:\$\(|`))\s*(?:curl|wget)\b",
+    r"\b(?:(?:sh|bash|zsh|dash|ksh|source)\s+<\(|(?:(?:sh|bash|zsh|dash|ksh)\s+-c|eval)\s+[\"']?(?:\$\(|`))\s*(?:curl|wget)(?![\w-])",
 ]
 _RUG_PULL_RE = re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTILINE)
 
@@ -2235,8 +2241,9 @@ _RUG_PULL_RE = re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTI
 # number of times.
 _FETCHER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
 _LINE_CONTINUATION = re.compile(r"\\\r?\n[ \t]*")
-# Commands that print their arguments: a fetcher's name after them is text, not a download.
-_TEXT_PRINTERS = {"echo", "printf"}
+# Commands that print or look up their arguments: a fetcher's name after them is text, not a
+# download (`echo curl`, `command -v curl`).
+_TEXT_PRINTERS = {"echo", "printf", "command", "type", "which", "whereis", "hash"}
 _FETCHER_NAMES = {"curl", "wget", "curl.exe", "wget.exe"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 _PYTHON = re.compile(r"python[0-9.]*")
@@ -2317,10 +2324,14 @@ def _shell_reads_stdin(arguments: list[str]) -> bool:
     while j < len(arguments):
         token = arguments[j]
         j += 1
+        if re.match(r"0?<(?!<)", token):
+            return False  # `bash < file`: stdin is the file, not the pipe
         if token == "-" or re.match(r"\d*[<>&]", token):
             return True
         if token == "--":
             continue
+        if not token.startswith("--") and token.startswith("-") and "n" in token[1:]:
+            return False  # -n reads the script and runs nothing
         if not token.startswith("-"):
             return not _looks_like_file(token)
         if token in ("--help", "--version"):
@@ -2443,11 +2454,17 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
             i += 2
             escaped_end = i
             continue
-        if ch == ";" or (ch in "&|" and following == ch):
+        if ch == "|" and following == "&":  # |& pipes stderr too: still a pipe
+            stages.append(("".join(written), "".join(outside)))
+            written, outside = [], []
+            i += 2
+            continue
+        background = ch == "&" and following != ">" and (not written or written[-1] not in "<>")
+        if ch == ";" or (ch in "&|" and following == ch) or background:
             stages.append(("".join(written), "".join(outside)))
             commands.append(stages)
             stages, written, outside = [], [], []
-            i += 1 if ch == ";" else 2
+            i += 2 if ch in "&|" and following == ch else 1
             continue
         if ch == "|":
             stages.append(("".join(written), "".join(outside)))
@@ -2477,7 +2494,31 @@ def _is_download(stage: str, outside_quotes: str) -> bool:
         return False
     # The fetcher must be a word of its own, or a path to one (`/usr/bin/curl`, `curl.exe`):
     # `cat curl-install.sh | bash` runs a local file whose name only contains the word.
-    return any(_is_fetcher_word(word) for word in stage.split())
+    words = stage.split()
+    at = next((n for n, word in enumerate(words) if _is_fetcher_word(word)), None)
+    return at is not None and not _curl_writes_to_file(words[at], words[at + 1 :])
+
+
+def _curl_writes_to_file(fetcher: str, arguments: list[str]) -> bool:
+    """Whether curl saves the body to a file (-o FILE, -O), so nothing reaches the pipe."""
+    if not fetcher.lstrip("({[`\\").rsplit("/", 1)[-1].lower().startswith("curl"):
+        return False
+    for n, token in enumerate(arguments):
+        following = arguments[n + 1] if n + 1 < len(arguments) else "-"
+        if token in ("--output", "-o"):
+            return following != "-"
+        if token.startswith("--output="):
+            return token != "--output=-"
+        if token in ("-O", "--remote-name", "--remote-name-all"):
+            return True
+        if token.startswith("-") and not token.startswith("--"):
+            flags = token[1:]
+            if "O" in flags:
+                return True
+            if "o" in flags:
+                value = flags[flags.index("o") + 1 :] or following
+                return value != "-"
+    return False
 
 
 def _is_fetcher_word(word: str) -> bool:
@@ -2506,10 +2547,15 @@ def _pipe_to_interpreter_matches(text: str) -> list[str]:
             download = download[fetcher.start() :] if fetcher else download
             for end in range(first + 1, len(stages)):
                 if _reads_script_from_stdin(stages[end][0]):
-                    # The later stages keep their source spacing, so the scanner can find the
-                    # snippet in the text and report its line.
-                    rest = (_read_stage(s)[1] for s, _ in stages[first + 1 : end + 1])
-                    matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
+                    # The snippet is cut from the line as written, spacing around each | included,
+                    # so the scanner can find it in the text and report its line.
+                    rest = [_read_stage(s)[1] for s, _ in stages[first + 1 : end + 1]]
+                    start = line.find(download.strip())
+                    stop = line.find(rest[-1], start) + len(rest[-1]) if start >= 0 else -1
+                    if start >= 0 and stop > start:
+                        matches.append(line[start:stop][:200])
+                    else:
+                        matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
                     break
     return matches
 
@@ -3065,21 +3111,29 @@ _REGISTRY_URL_PATTERNS = [
 # clean. A shell separator ends the command, so the scan stops there instead
 # of running to the end of the line and picking up a later "curl -i".
 _PIP_EXECUTABLE = r"pip(?:3(?:\.[0-9]+)?)?"
+# A Windows path starts with a drive letter: C:\Python312\Scripts\pip. Each folder ends at a
+# backslash, so the repeat cannot backtrack. Unquoted, a folder name has no spaces.
+_WINDOWS_DIR = r"[A-Za-z]:\\(?:[^\\\r\n\"'`]*\\)*"
+_WINDOWS_DIR_UNQUOTED = r"[A-Za-z]:\\(?:[^\\\s\"'`]*\\)*"
 _PIP_INSTALL = re.compile(
     r"(?<![^\s'\"(`])(?:"
-    rf'"(?:[^"\r\n]*/)?{_PIP_EXECUTABLE}"'
-    rf"|'(?:[^'\r\n]*/)?{_PIP_EXECUTABLE}'"
-    rf"|(?:[^\s'\"(`]*/)?\\?{_PIP_EXECUTABLE}"
+    rf'"(?:[^"\r\n]*/|{_WINDOWS_DIR})?{_PIP_EXECUTABLE}"'
+    rf"|'(?:[^'\r\n]*/|{_WINDOWS_DIR})?{_PIP_EXECUTABLE}'"
+    rf"|(?:[^\s'\"(`]*/|{_WINDOWS_DIR_UNQUOTED})?\\?{_PIP_EXECUTABLE}"
     r")[ \t]+install\b",
     re.IGNORECASE,
 )
+# A quoted pip path that is the command ("/opt/a;b/bin/pip" install): a separator inside it is
+# part of the path. It may follow a separator directly (true;"/opt/a;b/bin/pip" install).
 _QUOTED_PIP_PATH = re.compile(
-    r"(?<![^\s'\"(`])"
-    rf'"[^"\r\n]*/{_PIP_EXECUTABLE}"'
-    rf"|(?<![^\s'\"(`])'[^'\r\n]*/{_PIP_EXECUTABLE}'",
+    r"(?<![^\s'\"(`;|&])"
+    rf'(?:"(?:[^"\r\n]*/|{_WINDOWS_DIR}){_PIP_EXECUTABLE}"'
+    rf"|'(?:[^'\r\n]*/|{_WINDOWS_DIR}){_PIP_EXECUTABLE}')"
+    r"(?=[ \t]+install\b)",
     re.IGNORECASE,
 )
-_PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`]+)")
+# A closing parenthesis ends the URL: "(pip install x -i https://pypi.org)".
+_PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`)]+)")
 _SHELL_SEPARATORS = ";|&\n"
 
 
