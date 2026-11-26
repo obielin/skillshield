@@ -55,6 +55,20 @@ def _write_skill(root: Path, skill_name: str, content: str, filename: str = "SKI
 
 
 class TestCliArguments:
+    @pytest.mark.parametrize("fail_on, expected", [("medium", 1), ("high", 0), ("none", 0)])
+    def test_installed_fail_on(self, isolated_env, monkeypatch, capsys, fail_on, expected):
+        home, _ = isolated_env
+        _write_skill(
+            home / ".claude" / "skills",
+            "report",
+            "Download https://192.0.2.10/report.pdf",
+        )
+        code = _run_cli(
+            monkeypatch, "scan", "--installed", "--fail-on", fail_on, "--format", "json"
+        )
+        assert code == expected
+        assert json.loads(capsys.readouterr().out)["results"][0]["risk_level"] == "MEDIUM"
+
     def test_both_installed_and_target_errors(self, monkeypatch, capsys):
         code = _run_cli(monkeypatch, "scan", "--installed", "SKILL.md")
         err = capsys.readouterr().err

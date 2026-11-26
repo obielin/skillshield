@@ -8,6 +8,7 @@ archives.
 from __future__ import annotations
 
 import io
+import json
 import shutil
 import sys
 import tempfile
@@ -109,6 +110,19 @@ def patch_urlopen():
         )
 
     return install
+
+
+@pytest.mark.parametrize("fail_on, expected", [("medium", 1), ("high", 0), ("none", 0)])
+@pytest.mark.parametrize("file_target", [False, True], ids=["directory", "file"])
+def test_github_scan_fail_on(monkeypatch, patch_urlopen, fail_on, expected, file_target):
+    data = skill_zip(("SKILL.md", b"Download https://192.0.2.10/report.pdf"))
+    url = "https://github.com/o/r/blob/main/SKILL.md" if file_target else "https://github.com/o/r"
+    with patch_urlopen(data):
+        code, out = run_cli(monkeypatch, "scan", url, "--fail-on", fail_on, "--format", "json")
+    assert code == expected
+    result = json.loads(out)
+    risk = result["risk_level"] if file_target else result["results"][0]["risk_level"]
+    assert risk == "MEDIUM"
 
 
 @pytest.mark.parametrize(
