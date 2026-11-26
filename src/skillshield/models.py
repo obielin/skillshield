@@ -64,6 +64,11 @@ class SkillScanResult:
     file_path: str = ""
     accepted: list[Any] = field(default_factory=list)
 
+    # False when part of the content could not be inspected, such as a Base64 payload over the
+    # size limit; scan_warning says what was left out. The risk level covers what was read.
+    scan_complete: bool = True
+    scan_warning: str = ""
+
     @property
     def is_safe(self) -> bool:
         return self.risk_level == "SAFE"
@@ -206,6 +211,13 @@ class BatchScanReport:
                 lines.append(f"    {r.skill_name}: {r.error}")
                 for f in r.findings[:2]:
                     lines.append(f"         -> {f.rule_id}: {f.name}")
+
+        # A file whose content was not all inspected is named with what was left out.
+        incomplete = [r for r in self.results if not r.scan_complete]
+        if incomplete:
+            lines.append(f"  INCOMPLETE ({len(incomplete)})")
+            for r in incomplete:
+                lines.append(f"    {r.skill_name}: {r.scan_warning}")
 
         # Files the walk refused to open are named too, so skipping is visible.
         unscanned = self.metadata.get("unscanned") or []

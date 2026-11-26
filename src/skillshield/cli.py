@@ -143,6 +143,9 @@ def _print_result(result, verbose: bool = False, no_color: bool = False) -> None
     print(f"  Lines:       {result.line_count:,}")
     print(f"  Scan time:   {result.scan_time_ms:.1f}ms")
 
+    if not result.scan_complete:
+        print(color(f"  Scan incomplete: {result.scan_warning}", "MEDIUM"))
+
     if result.error:
         print(f"  Error: {result.error}")
         # A file can be unreadable as a tool listing and still match text rules.
@@ -196,6 +199,7 @@ def _emit_batch(report, args, source: str | None = None) -> int:
                     "risk_level": r.risk_level,
                     "risk_score": r.risk_score,
                     **({"error": r.error} if r.error else {}),
+                    **({"scan_warning": r.scan_warning} if not r.scan_complete else {}),
                     "findings": [
                         {
                             "id": f.rule_id,
@@ -263,6 +267,7 @@ def _emit_installed(installed, args) -> int:
                     "risk_level": r.risk_level,
                     "risk_score": r.risk_score,
                     **({"error": r.error} if r.error else {}),
+                    **({"scan_warning": r.scan_warning} if not r.scan_complete else {}),
                     "findings": [
                         {
                             "id": f.rule_id,
@@ -301,6 +306,7 @@ def _emit_single(results, args, source: str | None = None) -> int:
             "risk_level": results[0].risk_level,
             "risk_score": results[0].risk_score,
             **({"error": results[0].error} if results[0].error else {}),
+            **({"scan_warning": results[0].scan_warning} if not results[0].scan_complete else {}),
             "findings": [
                 {
                     "id": f.rule_id,

@@ -249,6 +249,11 @@ def summary_markdown(
     omitted_errors = len(errors) - MAX_ERRORS_LISTED
     if omitted_errors > 0:
         lines.append(f"- ... and {omitted_errors} more, not listed here")
+    incomplete = [r for r in results if not r.scan_complete]
+    for r in incomplete[:MAX_ERRORS_LISTED]:
+        lines.append(f"- Scan of `{r.skill_name}` is incomplete: {r.scan_warning}")
+    if len(incomplete) > MAX_ERRORS_LISTED:
+        lines.append(f"- ... and {len(incomplete) - MAX_ERRORS_LISTED} more, not listed here")
     for m in missing[:MAX_ERRORS_LISTED]:
         lines.append(f"- Path does not exist: `{m}`")
     omitted_missing = len(missing) - MAX_ERRORS_LISTED
@@ -264,6 +269,16 @@ def summary_markdown(
             lines.append(f"- ... and {omitted} more, not listed here")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _command_data(text: str) -> str:
+    """Escape text for the message of a GitHub workflow command."""
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _command_property(text: str) -> str:
+    """Escape text for a property of a GitHub workflow command, such as file=."""
+    return _command_data(text).replace(":", "%3A").replace(",", "%2C")
 
 
 def console_report(
@@ -316,6 +331,12 @@ def console_report(
         lines.append(
             f"::warning::SkillShield could not read {unread_total} file(s); the first "
             f"{unread} are annotated here, the other {unread_total - unread} are counted only."
+        )
+    incomplete = [r for r in results if not r.scan_complete]
+    for r in incomplete[:MAX_ERRORS_LISTED]:
+        lines.append(
+            f"::warning file={_command_property(r.skill_name)}::"
+            f"SkillShield scan incomplete: {_command_data(r.scan_warning)}"
         )
     for m in missing[:MAX_ERRORS_LISTED]:
         lines.append(f"::error::SkillShield: path does not exist: {m}")

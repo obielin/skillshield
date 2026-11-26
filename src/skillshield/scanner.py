@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import importlib.util
 import re
 import sys
 import time
+from bisect import bisect_right
 from pathlib import Path
 from typing import Callable
 
@@ -264,6 +267,77 @@ def _pattern_line_numbers(text: str, pattern: re.Pattern[str]) -> list[int]:
     return line_numbers
 
 
+_BASE64_RE = re.compile(r"[A-Za-z0-9+/]{60,}={0,2}")
+# Maximum size of one Base64 payload.
+_MAX_BASE64_CHARS = 64 * 1024
+# Maximum combined size of Base64 candidates processed in one scan.
+# This prevents many individually valid payloads from exhausting CPU time.
+_MAX_TOTAL_BASE64_CHARS = 1024 * 1024
+
+_MIN_PRINTABLE_RATIO = 0.85
+
+
+def _decode_base64_payloads(text: str) -> tuple[list[tuple[str, int]], str]:
+    """Decode the Base64 runs in text that hold mostly printable UTF-8 text.
+
+    Returns the decoded payloads with the line each one starts on, and a warning naming what was
+    not decoded: a payload over the size limit, or the payloads after the total limit. The warning
+    is empty when every payload was read, so a skipped payload is never silent.
+    """
+    decoded_payloads: list[tuple[str, int]] = []
+    skipped: list[str] = []
+    oversized = 0
+    total_encoded_chars = 0
+
+    # Newline positions once, for the line of each payload.
+    newline_positions = [i for i, char in enumerate(text) if char == "\n"]
+
+    for match in _BASE64_RE.finditer(text):
+        encoded = match.group(0)
+        line_number = bisect_right(newline_positions, match.start()) + 1
+
+        if len(encoded) > _MAX_BASE64_CHARS:
+            # Only the first oversized payload is described, so the warning stays short however
+            # many there are; the rest are counted.
+            if not oversized:
+                skipped.append(
+                    f"a Base64 payload of {len(encoded):,} characters on line {line_number} is "
+                    f"over the {_MAX_BASE64_CHARS:,}-character limit and was not decoded"
+                )
+            oversized += 1
+            continue
+
+        # The total limit is checked before decoding another payload, so many payloads just
+        # under the size limit cannot exhaust CPU time.
+        if total_encoded_chars + len(encoded) > _MAX_TOTAL_BASE64_CHARS:
+            skipped.append(
+                f"Base64 decoding stopped at line {line_number}, because the aggregate limit of "
+                f"{_MAX_TOTAL_BASE64_CHARS:,} characters was reached; later payloads were not "
+                "decoded"
+            )
+            break
+
+        total_encoded_chars += len(encoded)
+
+        try:
+            decoded_bytes = base64.b64decode(encoded + "=" * (-len(encoded) % 4), validate=True)
+            # Invalid UTF-8 is still rejected; line endings are read as a file's are.
+            decoded = decoded_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            continue
+
+        if not decoded:
+            continue
+
+        printable_count = sum(char.isprintable() or char in "\r\n\t" for char in decoded)
+        if printable_count / len(decoded) >= _MIN_PRINTABLE_RATIO:
+            decoded_payloads.append((decoded, line_number))
+
+    if oversized > 1:
+        skipped[0] += f" (and {oversized - 1:,} more over the limit)"
+    return decoded_payloads, "; ".join(skipped)
+
+
 class SkillScanner:
     """
     Scan AI agent skills for security vulnerabilities.
@@ -326,6 +400,14 @@ class SkillScanner:
         # says it was hidden. Each character of it knows the line it came from, taken from the
         # text itself: a line number is never read back from a snippet, which the skill wrote.
         hidden, hidden_owners = hidden_tag_text_with_lines(text)
+        # Base64 text payloads are decoded once and read with every rule but SG-008, which would
+        # only flag the encoding again. A match in decoded text joins that rule's one finding,
+        # with the line the payload sits on, so an encoded copy adds a snippet, not a second score.
+        # Decoding runs whenever SG-008 is in the rule set, even below the reporting severity.
+        if any(rule.id == "SG-008" for rule in self.rules):
+            decoded, scan_warning = _decode_base64_payloads(text)
+        else:
+            decoded, scan_warning = [], ""
 
         for rule in self.rules:
             if self._below_min_severity(rule.severity):
@@ -342,7 +424,15 @@ class SkillScanner:
                 hits = rule.match_listing(listing) if listing is not None else []
             except Exception:
                 hits = []
-            if not snippets and not found_hidden and not hits:
+            found_decoded: list[tuple[str, int]] = []
+            if rule.id != "SG-008":
+                for payload, payload_line in decoded:
+                    try:
+                        found = rule.match(payload)
+                    except Exception:
+                        found = []
+                    found_decoded.extend((snippet, payload_line) for snippet in found)
+            if not snippets and not found_hidden and not found_decoded and not hits:
                 continue
             # Pattern hits can span lines or repeat, so a pattern rule reports the line of each
             # match offset. Other check_fn rules return plain strings, so their snippets are located.
@@ -365,10 +455,13 @@ class SkillScanner:
                 start = hidden.find(match)
                 owners = hidden_owners[start : start + len(match)] if start >= 0 else []
                 line_numbers.update(owners or hidden_owners)
+            # A match in decoded Base64 reports the line the payload is on.
+            line_numbers.update(payload_line for _, payload_line in found_decoded)
             # A listing finding reports the line where its tool starts.
             line_numbers.update(tool.line for tool, _ in hits)
             line_numbers = sorted(n for n in line_numbers if n >= 1)
             snippets = snippets + [f"[hidden in Unicode tag characters] {s}" for s in found_hidden]
+            snippets += [f"[decoded base64] {snippet}" for snippet, _ in found_decoded]
             snippets += [snippet for _, snippet in hits]
             findings.append(Finding(rule=rule, snippets=snippets, line_numbers=line_numbers))
 
@@ -383,6 +476,8 @@ class SkillScanner:
             scan_time_ms=round((time.time() - t0) * 1000, 2),
             line_count=text.count("\n") + 1,
             char_count=len(text),
+            scan_complete=not scan_warning,
+            scan_warning=scan_warning,
         )
 
     def scan_file(self, path: str | Path, encoding: str = "utf-8") -> SkillScanResult:
