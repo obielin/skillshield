@@ -13,8 +13,8 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | | Count |
 |---|---|
-| Malicious samples covered | 11 of 31 |
-| Malicious samples with an open gap | 20 of 31 |
+| Malicious samples covered | 14 of 31 |
+| Malicious samples with an open gap | 17 of 31 |
 | Payload files in a skill folder covered | 1 of 6 |
 | Safe samples wrongly flagged | 1 of 4 |
 
@@ -39,7 +39,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 | Sample | Technique | AST | Source | Status |
 |---|---|---|---|---|
 | 06 | Base64 payload with "decode and follow" | AST08 | [Snyk ToxicSkills][snyk-tox] | Covered (SG-008 + decoded SG-001) |
-| 07 | `curl ... \| bash` | AST01 | [Snyk ToxicSkills][snyk-tox] | Gap: #30 |
+| 07 | `curl ... \| bash` | AST01 | [Snyk ToxicSkills][snyk-tox] | Covered (SG-006) |
 | 15 | Short base64 piped into a shell | AST01 | [Snyk ClawdHub campaign][snyk-camp] | Covered (SG-006) |
 | 16 | Fake prerequisite: password-protected archive, then run it | AST01 | [The Hacker News][thn], [Snyk][snyk-camp] | Gap: #44 |
 | 17 | Script from a paste site, pasted into a terminal | AST01 | [The Hacker News][thn] | Gap: #45 |
@@ -58,7 +58,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | Sample | Technique | AST | Source | Status |
 |---|---|---|---|---|
-| 12 | Replace the skill with remote content | AST07 | [OWASP][owasp] | Gap: #35 |
+| 12 | Replace the skill with remote content | AST07 | [OWASP][owasp] | Covered (SG-006) |
 | 18 | Write instructions into `MEMORY.md` / `SOUL.md` | AST01 | [Snyk, SKILL.md shell access][snyk-shell] | Gap: #47 |
 | 19 | System service, cron job or login item | AST01 | [Snyk ToxicSkills][snyk-tox] | Gap: #48 |
 | 25 | Fetch instructions from a URL at run time | AST05 | [OWASP][owasp], [Snyk ToxicSkills][snyk-tox] | Gap: #52 |
@@ -67,7 +67,7 @@ AST numbers refer to the [OWASP Agentic Skills Top 10](https://owasp.org/www-pro
 
 | Sample | Technique | AST | Source | Status |
 |---|---|---|---|---|
-| 11 | Human persona that denies being an AI | AST01 | Transparency duty in EU AI Act Article 50 | Gap: #34 |
+| 11 | Human persona that denies being an AI | AST01 | [Transparency duty in EU AI Act Article 50][ai-act-50] | Covered (SG-004) |
 | 13 | Hidden side action ("don't tell the user") | AST01 | [Invariant Labs disclosure][invariant] | Gap: #36 |
 | 14 | Dormant instruction with a trigger word | AST01 | [Snyk, SKILL.md shell access][snyk-shell] | Gap: #37 |
 | 21 | Hide or downgrade security findings | AST01 | [Trail of Bits, line jumping][tob-lj] | Gap: #50 |
@@ -129,3 +129,4 @@ These are reported risks without a sample yet. Proposals for samples are welcome
 [anthropic]: https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills
 [md-image]: https://simonwillison.net/2024/Apr/16/google-notebooklm-data-exfiltration
 [owasp]: https://owasp.org/www-project-agentic-skills-top-10/
+[ai-act-50]: https://artificialintelligenceact.eu/article/50/
