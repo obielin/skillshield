@@ -143,14 +143,14 @@ def _print_result(result, verbose: bool = False, no_color: bool = False) -> None
     print(f"  Lines:       {result.line_count:,}")
     print(f"  Scan time:   {result.scan_time_ms:.1f}ms")
 
+    if not result.scan_complete:
+        print(color(f"  Scan incomplete: {result.scan_warning}", "MEDIUM"))
+
     if result.error:
         print(f"  Error: {result.error}")
         # A file can be unreadable as a tool listing and still match text rules.
         if not result.findings:
             return
-
-    if not result.scan_complete:
-        print(color(f"  Scan incomplete: {result.scan_warning}", "MEDIUM"))
 
     if result.is_safe:
         print(color("  No security issues detected.", "SAFE"))

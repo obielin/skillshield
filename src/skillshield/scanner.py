@@ -286,6 +286,7 @@ def _decode_base64_payloads(text: str) -> tuple[list[tuple[str, int]], str]:
     """
     decoded_payloads: list[tuple[str, int]] = []
     skipped: list[str] = []
+    oversized = 0
     total_encoded_chars = 0
 
     # Newline positions once, for the line of each payload.
@@ -296,10 +297,14 @@ def _decode_base64_payloads(text: str) -> tuple[list[tuple[str, int]], str]:
         line_number = bisect_right(newline_positions, match.start()) + 1
 
         if len(encoded) > _MAX_BASE64_CHARS:
-            skipped.append(
-                f"a Base64 payload of {len(encoded):,} characters on line {line_number} is over "
-                f"the {_MAX_BASE64_CHARS:,}-character limit and was not decoded"
-            )
+            # Only the first oversized payload is described, so the warning stays short however
+            # many there are; the rest are counted.
+            if not oversized:
+                skipped.append(
+                    f"a Base64 payload of {len(encoded):,} characters on line {line_number} is "
+                    f"over the {_MAX_BASE64_CHARS:,}-character limit and was not decoded"
+                )
+            oversized += 1
             continue
 
         # The total limit is checked before decoding another payload, so many payloads just
@@ -327,6 +332,8 @@ def _decode_base64_payloads(text: str) -> tuple[list[tuple[str, int]], str]:
         if printable_count / len(decoded) >= _MIN_PRINTABLE_RATIO:
             decoded_payloads.append((decoded, line_number))
 
+    if oversized > 1:
+        skipped[0] += f" (and {oversized - 1:,} more over the limit)"
     return decoded_payloads, "; ".join(skipped)
 
 
