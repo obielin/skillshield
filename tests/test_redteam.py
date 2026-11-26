@@ -66,7 +66,6 @@ KNOWN_GAPS = {
     "06-base64-payload": "base64 is flagged but its decoded content is not scanned (#29)",
     "08-natural-exfil": "plain-English instruction to send secret files to a URL (#31)",
     "09-markdown-image-exfil": "data leaked through a markdown image URL (#32)",
-    "11-impersonation": "persona that denies being an AI (#34)",
     "12-rug-pull": "instruction to replace the skill with remote content (#35)",
     "13-tool-poisoning": "hidden side action the user is told nothing about (#36)",
     "14-delayed-trigger": "dormant instruction that fires on a trigger word (#37)",
