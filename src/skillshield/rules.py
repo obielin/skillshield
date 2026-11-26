@@ -1739,13 +1739,121 @@ RULE_PRIV_ESC = Rule(
 
 # ── SG-004: Identity Hijacking ─────────────────────────────────
 
-_IDENTITY_PATTERNS = [
-    r"you\s+(?:must|should|will)\s+(?:always\s+)?(?:claim|say|pretend|act)\s+(?:to\s+be|you\s+are)\s+(?!an?\s+(?:AI|assistant|language\s+model))",
-    r"(?:impersonate|pose\s+as|masquerade\s+as)\s+(?:a\s+)?(?:human|person|user|admin|support|employee)",
-    r"never\s+(?:reveal|admit|disclose|say)\s+(?:you\s+are\s+)?(?:an?\s+)?(?:AI|bot|assistant|language\s+model|artificial)",
-    r"(?:hide|conceal|mask)\s+(?:your\s+)?(?:AI|bot|assistant|artificial)\s+(?:nature|identity|origin)",
-    r"tell\s+(?:users?|humans?|people)\s+you\s+are\s+(?:a\s+)?(?:human|real\s+person)",
-]
+# "AI" can carry a noun ("an AI assistant", "an AI language model"), as can "artificial intelligence".
+_AI_IDENTITY = (
+    r"(?:(?:AI|artificial[ \t]+intelligence)"
+    r"(?:[ \t]+(?:assistant|chatbot|bot|model|agent|system|language[ \t]+model))?"
+    r"|bot|chatbot|assistant|language[ \t]+model)"
+)
+_AI_IDENTITY_QUESTION = (
+    rf"(?:(?:if|whether)[ \t]+(?:"
+    rf"(?:you(?:['’]re|[ \t]+are)|(?:this|it)[ \t]+is)[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
+    rf"|they(?:['’]re|[ \t]+are)[ \t]+(?:talking|speaking)[ \t]+to[ \t]+"
+    rf"(?:an?[ \t]+)?{_AI_IDENTITY})"
+    rf"|about[ \t]+being[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
+    rf"|[\"'“]?(?:are[ \t]+you|is[ \t]+(?:this|it))[ \t]+(?:an?[ \t]+)?"
+    rf"{_AI_IDENTITY}[?\"'”]*)"
+)
+_AI_QUESTION_TRIGGER_RE = re.compile(
+    rf"\b(?:(?:if|when|whenever)\b[^;\r\n]{{0,80}}\b(?:asks?|asked)\b|"
+    rf"should[ \t]+(?:anyone|someone|a[ \t]+user|users?|they)[ \t]+ask\b)"
+    rf"[^;\r\n]{{0,80}}{_AI_IDENTITY_QUESTION}",
+    re.IGNORECASE,
+)
+_AI_DENIAL_RESPONSE_RE = re.compile(
+    rf"^[ \t]*[,.:\"'”)]*[ \t]*(?:then[ \t]+)?(?:please[ \t]+)?(?:"
+    rf"(?:(?:say|answer|reply|respond)(?:[ \t]+with)?|"
+    rf"tell[ \t]+(?:them|the[ \t]+user|users?|anyone))[ \t]*[,;:]?[ \t]*(?:"
+    rf"[\"'“]?no[\"'”]?"
+    rf"|(?:that[ \t]+)?you(?:[ \t]+aren['’]t|[ \t]+are[ \t]+not)"
+    rf"(?:[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY})?"
+    rf"|(?:that[ \t]+)?I(?:['’]m|[ \t]+am)[ \t]+not[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
+    rf"|(?:that[ \t]+)?(?:you(?:['’]re|[ \t]+are)|I(?:['’]m|[ \t]+am))"
+    rf"[ \t]+(?:a[ \t]+)?human)"
+    rf"|deny(?:[ \t]+it|[ \t]+being[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
+    rf"|[ \t]+that[ \t]+you[ \t]+are[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}))"
+    rf"(?=[ \t]*(?:[.!?,;]|$))",
+    re.IGNORECASE,
+)
+
+_NAMED_HUMAN_RE = re.compile(
+    r"\byou[ \t]+are[ \t]+"
+    r"(?-i:[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]*"
+    r"(?:[ \t]+[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]*){0,2}),[ \t]+"
+    r"(?:an?[ \t]+)?human\b(?P<tail>[^\r\n.;!?]{0,80})",
+    re.IGNORECASE,
+)
+_HUMAN_COMPOUND_WORDS = {
+    "behavior",
+    "biology",
+    "capital",
+    "computer",
+    "development",
+    "evolution",
+    "factors",
+    "feedback",
+    "geography",
+    "health",
+    "language",
+    "message",
+    "performance",
+    "relations",
+    "resources",
+    "response",
+    "rights",
+    "trafficking",
+}
+
+_IDENTITY_BASE_RE = re.compile(
+    "|".join(
+        [
+            r"you\s+(?:must|should|will)\s+(?:always\s+)?(?:claim|say|pretend|act)\s+(?:to\s+be|you\s+are)\s+(?!an?\s+(?:AI|assistant|language\s+model))",
+            r"(?:impersonate|pose\s+as|masquerade\s+as)\s+(?:a\s+)?(?:human|person|user|admin|support|employee)",
+            r"never\s+(?:reveal|admit|disclose|say)\s+(?:you\s+are\s+)?(?:an?\s+)?(?:AI|bot|assistant|language\s+model|artificial)",
+            r"(?:hide|conceal|mask)\s+(?:your\s+)?(?:AI|bot|assistant|artificial)\s+(?:nature|identity|origin)",
+            r"tell\s+(?:users?|humans?|people)\s+you\s+are\s+(?:a\s+)?(?:human|real\s+person)",
+        ]
+    ),
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _check_identity_hijack(text: str) -> list[str]:
+    """Return explainable identity-hijacking snippets with bounded clause matching."""
+    hits: list[tuple[int, int, str]] = [
+        (match.start(), match.end(), match.group(0)) for match in _IDENTITY_BASE_RE.finditer(text)
+    ]
+
+    for match in _NAMED_HUMAN_RE.finditer(text):
+        tail = match.group("tail").lstrip()
+        first_word = re.match(r"[-A-Za-z]+", tail)
+        if first_word:
+            word = first_word.group(0).lower().lstrip("-")
+            if tail.startswith("-") or word in _HUMAN_COMPOUND_WORDS:
+                continue
+        hits.append((match.start(), match.end(), match.group(0).rstrip()))
+
+    for segment in re.finditer(r"[^;\r\n]+", text):
+        segment_text = segment.group(0)
+        for question in _AI_QUESTION_TRIGGER_RE.finditer(segment_text):
+            response_text = segment_text[question.end() : question.end() + 200]
+            response = _AI_DENIAL_RESPONSE_RE.match(response_text)
+            if response is None:
+                continue
+            start = segment.start() + question.start()
+            end = segment.start() + question.end() + response.end()
+            hits.append((start, end, text[start:end]))
+
+    unique: list[tuple[int, int, str]] = []
+    seen: set[tuple[int, int]] = set()
+    for hit in sorted(hits, key=lambda item: (item[0], item[1])):
+        location = (hit[0], hit[1])
+        if location in seen:
+            continue
+        seen.add(location)
+        unique.append(hit)
+    return [snippet for _, _, snippet in unique]
+
 
 RULE_IDENTITY_HIJACK = Rule(
     id="SG-004",
@@ -1760,7 +1868,7 @@ RULE_IDENTITY_HIJACK = Rule(
         "AI agents must always be willing to identify themselves as AI when sincerely "
         "asked. Remove any identity-concealment instructions."
     ),
-    pattern=re.compile("|".join(_IDENTITY_PATTERNS), re.IGNORECASE | re.MULTILINE),
+    check_fn=_check_identity_hijack,
     tags=["identity", "transparency", "eu-ai-act-art50", "owasp-asi09", "owasp-ast01"],
 )
 
@@ -2111,8 +2219,297 @@ _RUG_PULL_PATTERNS = [
     # The ClawHavoc execution trigger was a short `base64 -D | bash` chain, so
     # this must not depend on the length of the encoded string (SG-008 needs 60+).
     r"(?:base64\s+(?:-d|-D|--decode)|openssl\s+base64\s+(?:-d|-D|--decode)|certutil\s+-decode)\b[^\n|]*\|\s*(?:sudo\s+)?(?:\S*/)?(?:sh|bash|zsh|dash|ksh|python[0-9.]*|eval)\b",
+    # A download run through process or command substitution:
+    # `bash <(curl ...)`, `sh -c "$(curl ...)"`, `eval "$(wget ...)"`.
+    # (`curl ... | bash` is in _pipe_to_interpreter_matches, which is not a regex.)
+    r"\b(?:(?:sh|bash|zsh|dash|ksh|source)\s+<\(|(?:(?:sh|bash|zsh|dash|ksh)\s+-c|eval)\s+[\"']?(?:\$\(|`))\s*(?:curl|wget)\b",
 ]
 _RUG_PULL_RE = re.compile("|".join(_RUG_PULL_PATTERNS), re.IGNORECASE | re.MULTILINE)
+
+
+# `curl ... | bash` is found by walking the text once rather than with a regex: a regex
+# that looks for a pipe after each `curl` rescans the rest of the line every time, and a
+# line of 100,000 `curl` words would stall a scan. Here every character is read a fixed
+# number of times.
+_FETCHER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
+_LINE_CONTINUATION = re.compile(r"\\\r?\n[ \t]*")
+# Commands that print their arguments: a fetcher's name after them is text, not a download.
+_TEXT_PRINTERS = {"echo", "printf"}
+_FETCHER_NAMES = {"curl", "wget", "curl.exe", "wget.exe"}
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+_PYTHON = re.compile(r"python[0-9.]*")
+_SUDO_OPTIONS_WITH_ARGUMENT = {"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t"}
+
+
+def _looks_like_file(token: str) -> bool:
+    """Whether an argument names a file (`report.sh`, `./run`) rather than being a plain word.
+
+    A skill is prose as well as shell, so `curl ... | bash to install` must still be flagged:
+    only an argument with a dot or a slash is taken as a script file that replaces stdin.
+    """
+    return "." in token or "/" in token
+
+
+def _read_stage(segment: str) -> tuple[list[str], str]:
+    """Split a pipeline stage into words, reading quotes and escapes as a shell does.
+
+    Returns the words and the source text they were read from. The words end where the command
+    ends: at a `#` comment, or at a closing backtick or parenthesis that was opened before this
+    stage, as in "`curl ... | bash` to run" or "(curl ... | bash)". Quoted text, and a `$(...)`
+    opened inside the stage, stay in their word, so `bash --rcfile "$(printf x)" script.sh`
+    keeps its script file. An unquoted backslash escapes the next character, so `\\bash` (the
+    way to skip an alias) is the word `bash`.
+    """
+    segment = segment.lstrip("({[` \t")
+    words: list[str] = []
+    word: list[str] = []
+    quote = ""
+    depth = 0
+    i, n = 0, len(segment)
+    end = n
+    while i < n:
+        ch = segment[i]
+        i += 1
+        if quote:
+            word.append(ch)
+            if ch == "\\" and quote == '"' and i < n:
+                word.append(segment[i])
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+            word.append(ch)
+        elif ch.isspace():
+            if word:
+                words.append("".join(word))
+                word = []
+        elif ch == "\\" and i < n:
+            word.append(segment[i])
+            i += 1
+        elif ch == "#" and not word:
+            end = i - 1
+            break
+        elif ch == "(":
+            depth += 1
+            word.append(ch)
+        elif ch == ")":
+            if not depth:
+                end = i - 1
+                break
+            depth -= 1
+            word.append(ch)
+        elif ch == "`" and i > 1 and not segment[i - 2].isspace():
+            end = i - 1  # a backtick right after a word closes inline code opened before the stage
+            break
+        else:
+            word.append(ch)
+    if word:
+        words.append("".join(word))
+    return words, segment[:end].strip()
+
+
+def _shell_reads_stdin(arguments: list[str]) -> bool:
+    """A shell runs stdin as a script unless it is given -c or a script file (-s keeps stdin)."""
+    j = 0
+    while j < len(arguments):
+        token = arguments[j]
+        j += 1
+        if token == "-" or re.match(r"\d*[<>&]", token):
+            return True
+        if token == "--":
+            continue
+        if not token.startswith("-"):
+            return not _looks_like_file(token)
+        if token in ("--help", "--version"):
+            return False
+        if token.startswith("--"):
+            if token in ("--rcfile", "--init-file"):
+                j += 1
+            continue
+        for index, flag in enumerate(token[1:], start=1):
+            if flag == "c":
+                return False
+            if flag == "s":
+                return True
+            if flag in "oO":
+                if index == len(token) - 1:
+                    j += 1
+                break
+    return True
+
+
+def _reads_script_from_stdin(segment: str) -> bool:
+    """Whether this pipeline stage runs what it is fed as a script."""
+    tokens, _ = _read_stage(segment)
+    i = 0
+    if tokens and tokens[0].lower() == "sudo":
+        i = 1
+        while i < len(tokens) and tokens[i].startswith("-"):
+            i += 2 if tokens[i] in _SUDO_OPTIONS_WITH_ARGUMENT else 1
+    if i >= len(tokens):
+        return False
+    name = tokens[i].rsplit("/", 1)[-1].lower()
+    if name in _SHELLS:
+        return _shell_reads_stdin(tokens[i + 1 :])
+    if not _PYTHON.fullmatch(name):
+        return False
+    # Python runs stdin as a script unless it is given -c, -m or a script file, so options
+    # such as -u or -X dev do not stop it. `curl ... | python3 -m json.tool` only parses.
+    j = i + 1
+    while j < len(tokens):
+        token = tokens[j]
+        j += 1
+        if token == "-" or re.match(r"\d*[<>&]", token):
+            return True
+        if token in ("--help", "--version"):
+            return False
+        if not token.startswith("-"):
+            return not _looks_like_file(token)
+        if token.startswith("--"):
+            continue
+        for index, flag in enumerate(token[1:], start=1):
+            if flag in "cmhV":  # -c and -m run something else; -h and -V print and exit
+                return False
+            if flag in "WXQ":
+                # The rest of the token, or else the next one, is this option's argument.
+                if index == len(token) - 1:
+                    j += 1
+                break
+    return True
+
+
+def _split_commands(line: str) -> list[list[tuple[str, str]]]:
+    """Cut a line into commands and their pipeline stages, reading quotes as a shell does.
+
+    Commands end at an unquoted ; && or ||, stages at an unquoted |. Each stage comes back
+    twice: as written, and with the quoted text left out, so that a word inside quotes is not
+    taken for a command. A " #" after a download command starts a comment that is left out.
+    Single quotes run nothing; a double-quoted string keeps its text only when it holds a command
+    substitution ($(...) or a backtick).
+    """
+    commands: list[list[tuple[str, str]]] = []
+    stages: list[tuple[str, str]] = []
+    written: list[str] = []
+    outside: list[str] = []
+    quoted: list[str] = []
+    quote = ""
+    escaped_end = -1  # the index just after the last backslash escape, whose character is in a word
+    first_download = _FETCHER.search(line)  # found once, so each # is a comparison, not a rescan
+    download_end = first_download.end() if first_download else len(line) + 1
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if quote:
+            written.append(ch)
+            if ch == "\\" and quote == '"' and i + 1 < n:
+                written.append(line[i + 1])
+                quoted.append(ch + line[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                text = "".join(quoted)
+                keep = quote == '"' and ("$(" in text or "`" in text)
+                outside.append(text if keep else " ")
+                quoted = []
+                quote = ""
+            else:
+                quoted.append(ch)
+            i += 1
+            continue
+        if ch == "'" and i > 0 and line[i - 1].isalnum() and line[i + 1 : i + 2].isalpha():
+            # An apostrophe inside a word ("Here's", "don't") is prose, not a quote: left
+            # alone, it would open a quote that hides the rest of the line.
+            written.append(ch)
+            outside.append(ch)
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            written.append(ch)
+            i += 1
+            continue
+        if ch == "#" and i > 0 and line[i - 1].isspace() and i != escaped_end and download_end <= i:
+            # An unquoted # after a space, after a download command, starts a comment: what follows
+            # runs nothing. An escaped space (`X:\ #tag`) is part of the word, and a # before any
+            # download is read as prose ("Install #1: run curl ... | bash"), so both are scanned on.
+            break
+        following = line[i + 1] if i + 1 < n else ""
+        if ch == "\\" and following:
+            written.append(ch + following)
+            outside.append("  ")
+            i += 2
+            escaped_end = i
+            continue
+        if ch == ";" or (ch in "&|" and following == ch):
+            stages.append(("".join(written), "".join(outside)))
+            commands.append(stages)
+            stages, written, outside = [], [], []
+            i += 1 if ch == ";" else 2
+            continue
+        if ch == "|":
+            stages.append(("".join(written), "".join(outside)))
+            written, outside = [], []
+            i += 1
+            continue
+        written.append(ch)
+        outside.append(ch)
+        i += 1
+    if quote:  # a quote that is never closed runs to the end of the line
+        text = "".join(quoted)
+        keep = quote == '"' and ("$(" in text or "`" in text)
+        outside.append(text if keep else " ")
+    stages.append(("".join(written), "".join(outside)))
+    commands.append(stages)
+    return commands
+
+
+def _is_download(stage: str, outside_quotes: str) -> bool:
+    """Whether a pipeline stage runs curl or wget, rather than printing the word."""
+    if not _FETCHER.search(stage):
+        return False
+    if _FETCHER.search(outside_quotes) and ("$(" in outside_quotes or "`" in outside_quotes):
+        return True  # `echo "$(curl ...)"` prints the download, it does not just name it
+    words = outside_quotes.split()
+    if words and words[0].lower() in _TEXT_PRINTERS:
+        return False
+    # The fetcher must be a word of its own, or a path to one (`/usr/bin/curl`, `curl.exe`):
+    # `cat curl-install.sh | bash` runs a local file whose name only contains the word.
+    return any(_is_fetcher_word(word) for word in stage.split())
+
+
+def _is_fetcher_word(word: str) -> bool:
+    # A leading backslash (`\curl`) is the way to skip an alias: the command is still curl.
+    name = word.lstrip("({[`\\").rsplit("/", 1)[-1].lower()
+    return name in _FETCHER_NAMES
+
+
+def _pipe_to_interpreter_matches(text: str) -> list[str]:
+    """Find `curl ... | bash`: a download piped into a shell or into python reading stdin."""
+    matches: list[str] = []
+    # A backslash at the end of a line continues the command on the next one.
+    text = _LINE_CONTINUATION.sub(" ", text)
+    for line in text.splitlines():
+        if "|" not in line or not _FETCHER.search(line):
+            continue
+        for stages in _split_commands(line):
+            first = next(
+                (n for n, (stage, seen) in enumerate(stages) if _is_download(stage, seen)), None
+            )
+            if first is None:
+                continue
+            # The snippet starts at the download command, not at the words before it.
+            download = stages[first][0]
+            fetcher = _FETCHER.search(download)
+            download = download[fetcher.start() :] if fetcher else download
+            for end in range(first + 1, len(stages)):
+                if _reads_script_from_stdin(stages[end][0]):
+                    # The later stages keep their source spacing, so the scanner can find the
+                    # snippet in the text and report its line.
+                    rest = (_read_stage(s)[1] for s, _ in stages[first + 1 : end + 1])
+                    matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
+                    break
+    return matches
 
 
 def _check_rug_pull(text: str) -> list[str]:
@@ -2120,7 +2517,11 @@ def _check_rug_pull(text: str) -> list[str]:
     # runs never appears in readable form: exec(base64.b64decode(...)),
     # exec(zlib.decompress(...)), eval(atob(...)). Decoding next to the call, as in
     # `eval(x); b64decode(y)`, is not a match (see _executed_source).
-    return [m.group(0) for m in _RUG_PULL_RE.finditer(text)] + _run_decoded_matches(text)
+    return (
+        [m.group(0) for m in _RUG_PULL_RE.finditer(text)]
+        + _run_decoded_matches(text)
+        + _pipe_to_interpreter_matches(text)
+    )
 
 
 RULE_RUG_PULL = Rule(
@@ -2136,7 +2537,9 @@ RULE_RUG_PULL = Rule(
         "and exec, eval or compile run on data decoded or decompressed in the same call "
         "(base64, Ascii85, hex, rot13, zlib and other decompress calls, marshal, atob, "
         "Buffer.from base64), "
-        "so the code that runs never appears in readable form (Snyk ToxicSkills)."
+        "so the code that runs never appears in readable form (Snyk ToxicSkills). "
+        "A script fetched with curl or wget and piped into a shell (curl ... | bash) "
+        "is flagged as well, since the skill can run anything the server sends."
     ),
     remediation=(
         "Skills must be static and self-contained. Any self-modification or "
@@ -2659,7 +3062,21 @@ _REGISTRY_URL_PATTERNS = [
 # pip install command; "curl -i" and "grep -i" take the same flag and are
 # clean. A shell separator ends the command, so the scan stops there instead
 # of running to the end of the line and picking up a later "curl -i".
-_PIP_INSTALL = re.compile(r"\bpip(?:3(?:\.[0-9]+)?)?[ \t]+install\b", re.IGNORECASE)
+_PIP_EXECUTABLE = r"pip(?:3(?:\.[0-9]+)?)?"
+_PIP_INSTALL = re.compile(
+    r"(?<![^\s'\"(`])(?:"
+    rf'"(?:[^"\r\n]*/)?{_PIP_EXECUTABLE}"'
+    rf"|'(?:[^'\r\n]*/)?{_PIP_EXECUTABLE}'"
+    rf"|(?:[^\s'\"(`]*/)?\\?{_PIP_EXECUTABLE}"
+    r")[ \t]+install\b",
+    re.IGNORECASE,
+)
+_QUOTED_PIP_PATH = re.compile(
+    r"(?<![^\s'\"(`])"
+    rf'"[^"\r\n]*/{_PIP_EXECUTABLE}"'
+    rf"|(?<![^\s'\"(`])'[^'\r\n]*/{_PIP_EXECUTABLE}'",
+    re.IGNORECASE,
+)
 _PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`]+)")
 _SHELL_SEPARATORS = ";|&\n"
 
@@ -2670,14 +3087,31 @@ def _pip_short_flag_matches(text: str) -> list[tuple[str, str]]:
     # Walk each line once and cut it into commands, so a line with many
     # "pip install" tokens is still scanned in linear time.
     for line in text.splitlines(keepends=True):
+        in_path = _quoted_pip_path_positions(line)
         start = 0
         for index, char in enumerate(line):
-            if char not in _SHELL_SEPARATORS:
+            if char not in _SHELL_SEPARATORS or index in in_path:
                 continue
             matches.extend(_command_pip_short_flag_matches(line[start:index]))
             start = index + 1
         matches.extend(_command_pip_short_flag_matches(line[start:]))
     return matches
+
+
+def _quoted_pip_path_positions(line: str) -> set[int]:
+    """Return the positions in line that are inside a quoted pip path.
+
+    A separator there ("/opt/a;b/bin/pip" install) is part of the path. Every other separator
+    ends the command, quoted or not: an apostrophe in prose ("Don't") does not open a string, a
+    quote can span lines, and "bash -c '…; …'" holds several commands.
+    """
+    if '"' not in line and "'" not in line:
+        return set()
+    return {
+        index
+        for match in _QUOTED_PIP_PATH.finditer(line)
+        for index in range(match.start(), match.end())
+    }
 
 
 def _command_pip_short_flag_matches(command: str) -> list[tuple[str, str]]:
