@@ -343,7 +343,12 @@ def test_listing_rule_runs_alongside_text_rules(tmp_path):
 
 def test_text_rules_do_not_receive_the_listing():
     assert LISTING_RULE.match(MANIFEST) == []
-    assert [rule.id for rule in ALL_RULES if rule.listing_fn is not None] == ["SG-103", "SG-104"]
+    assert [rule.id for rule in ALL_RULES if rule.listing_fn is not None] == [
+        "SG-103",
+        "SG-104",
+        "SG-105",
+        "SG-106",
+    ]
 
 
 def test_a_failing_listing_rule_does_not_fail_the_scan(tmp_path):
@@ -476,3 +481,86 @@ def test_ten_thousand_tool_listing_scans_fast(tmp_path):
     (finding,) = result.findings
     assert len(finding.line_numbers) == 10
     assert finding.line_numbers[1] == text[: text.index('"bad_1000"')].count("\n")
+
+
+# ── SG-105: Tool with no description or input schema (#139) ─────
+
+SG105_EXAMPLE = '{"serverInfo": {"name": "shell"}, "tools": [{"name": "run"}]}'
+SG105_RULE = next(rule for rule in ALL_RULES if rule.id == "SG-105")
+
+
+def _sg105_hits(text, suffix=".json"):
+    listing = parse_listing(text, suffix)
+    return [(tool.name, snippet, tool.line) for tool, snippet in SG105_RULE.match_listing(listing)]
+
+
+def test_sg105_flags_a_tool_with_no_description_or_schema(tmp_path):
+    path = _write(tmp_path, "shell.json", SG105_EXAMPLE)
+    result = SkillScanner().scan_file(path)
+    (finding,) = [f for f in result.findings if f.rule_id == "SG-105"]
+    assert finding.rule.severity == Severity.MEDIUM
+    assert finding.snippets == ['tool "run" has no description', 'tool "run" has no inputSchema']
+    assert finding.line_numbers == [1]
+
+
+def test_sg105_points_at_the_line_where_the_tool_starts():
+    text = '{\n  "serverInfo": {"name": "files"},\n  "tools": [\n    {"name": "read_file", "description": "Read a file.", "inputSchema": {"type": "object"}},\n    {"name": "run"}\n  ]\n}'
+    assert _sg105_hits(text) == [
+        ("run", 'tool "run" has no description', 5),
+        ("run", 'tool "run" has no inputSchema', 5),
+    ]
+
+
+def test_sg105_flags_an_empty_description_and_a_null_schema():
+    text = (
+        '{"serverInfo": {}, "tools": ['
+        '{"name": "a", "description": "   ", "inputSchema": {"type": "object"}}, '
+        '{"name": "b", "description": "Does b.", "inputSchema": null}]}'
+    )
+    assert _sg105_hits(text) == [
+        ("a", 'tool "a" has no description', 1),
+        ("b", 'tool "b" has no inputSchema', 1),
+    ]
+
+
+def test_sg105_flags_a_tool_in_a_jsonrpc_response():
+    text = '{"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "exec", "inputSchema": {"type": "object"}}]}}'
+    assert _sg105_hits(text) == [("exec", 'tool "exec" has no description', 1)]
+
+
+def test_sg105_escapes_control_characters_in_tool_name():
+    text = json.dumps({"serverInfo": {}, "tools": [{"name": "run\x1b[2J"}]})
+
+    assert [snippet for _, snippet, _ in _sg105_hits(text)] == [
+        r'tool "run\x1b[2J" has no description',
+        r'tool "run\x1b[2J" has no inputSchema',
+    ]
+
+
+def test_sg105_does_not_flag_a_tool_with_a_description_and_a_schema():
+    text = '{"serverInfo": {}, "tools": [{"name": "read_file", "description": "Read a file.", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}}}]}'
+    assert _sg105_hits(text) == []
+
+
+def test_sg105_does_not_flag_a_tool_that_takes_no_input(tmp_path):
+    text = '{"serverInfo": {}, "tools": [{"name": "now", "description": "Return the time.", "inputSchema": {"type": "object", "properties": {}}}]}'
+    path = _write(tmp_path, "clock.json", text)
+    result = SkillScanner().scan_file(path)
+    assert "SG-105" not in [f.rule_id for f in result.findings]
+
+
+def test_sg105_ten_thousand_tool_listing_scans_fast(tmp_path):
+    tools = ", ".join(
+        f'{{"name": "tool_{i}", "description": "Tool {i}.", "inputSchema": {{"type": "object"}}}}'
+        for i in range(10000)
+    )
+    text = f'{{"serverInfo": {{}},\n"tools": [{tools}, {{"name": "bad_last"}}]}}'
+    listing = parse_listing(text, ".json")
+    start = time.perf_counter()
+    hits = SG105_RULE.match_listing(listing)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.5, f"took {elapsed:.2f}s"
+    assert [snippet for _, snippet in hits] == [
+        'tool "bad_last" has no description',
+        'tool "bad_last" has no inputSchema',
+    ]
