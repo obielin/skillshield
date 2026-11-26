@@ -3609,6 +3609,18 @@ class TestSkillScanner:
         result = scanner.scan_text(encoded)
         assert not any(f.rule_id == "SG-001" for f in result.findings)
 
+    def test_decoded_text_reads_lone_carriage_returns_as_new_lines(self, scanner):
+        config = "[npm]\rregistry=https://example.com/simple/\r"
+        encoded = base64.b64encode((config * 3).encode()).decode()
+        decoded = {f.rule_id for f in scanner.scan_text(encoded).findings}
+        assert "SG-013" in decoded
+
+    def test_incomplete_scan_annotation_escapes_the_file_name(self, scanner):
+        from skillshield.ci import console_report
+
+        result = scanner.scan_text("QUJD" * 20_000, name="skills/notes, draft.md")
+        assert "::warning file=skills/notes%2C draft.md::" in console_report([result], [], 0)
+
     def test_complete_scan_has_no_warning(self, scanner):
         result = scanner.scan_text(CLEAN_SKILL)
         assert result.scan_complete is True and result.scan_warning == ""

@@ -271,6 +271,16 @@ def summary_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _command_data(text: str) -> str:
+    """Escape text for the message of a GitHub workflow command."""
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _command_property(text: str) -> str:
+    """Escape text for a property of a GitHub workflow command, such as file=."""
+    return _command_data(text).replace(":", "%3A").replace(",", "%2C")
+
+
 def console_report(
     results: list[SkillScanResult],
     missing: list[str],
@@ -325,7 +335,8 @@ def console_report(
     incomplete = [r for r in results if not r.scan_complete]
     for r in incomplete[:MAX_ERRORS_LISTED]:
         lines.append(
-            f"::warning file={r.skill_name}::SkillShield scan incomplete: {r.scan_warning}"
+            f"::warning file={_command_property(r.skill_name)}::"
+            f"SkillShield scan incomplete: {_command_data(r.scan_warning)}"
         )
     for m in missing[:MAX_ERRORS_LISTED]:
         lines.append(f"::error::SkillShield: path does not exist: {m}")

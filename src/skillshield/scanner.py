@@ -321,7 +321,8 @@ def _decode_base64_payloads(text: str) -> tuple[list[tuple[str, int]], str]:
 
         try:
             decoded_bytes = base64.b64decode(encoded + "=" * (-len(encoded) % 4), validate=True)
-            decoded = decoded_bytes.decode("utf-8")
+            # Invalid UTF-8 is still rejected; line endings are read as a file's are.
+            decoded = decoded_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
         except (binascii.Error, UnicodeDecodeError, ValueError):
             continue
 
