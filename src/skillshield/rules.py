@@ -2304,6 +2304,49 @@ RULE_EXCESSIVE_TOOL_COUNT = Rule(
 )
 
 
+# ── SG-105: Tool with no description or input schema ─────────
+
+
+def _listing_tool_gaps(listing: ToolListing) -> list[tuple[McpTool, str]]:
+    """A tool with no usable description, or no input schema, in a tool listing."""
+    hits: list[tuple[McpTool, str]] = []
+    for tool in listing.tools:
+        name = _escape_control_characters(tool.name)
+        if not (tool.description or "").strip():
+            hits.append((tool, f'tool "{name}" has no description'))
+        if tool.input_schema is None:
+            hits.append((tool, f'tool "{name}" has no inputSchema'))
+    return hits
+
+
+# An agent cannot tell when a tool without a description is safe to call, and a tool
+# without an input schema has no declared inputs, so nothing validates what it receives.
+RULE_TOOL_NO_DESCRIPTION_OR_SCHEMA = Rule(
+    id="SG-105",
+    name="Tool with No Description or Input Schema",
+    severity=Severity.MEDIUM,
+    description=(
+        "An MCP tool in the listing has no description, or no inputSchema. Without a "
+        "description the agent cannot tell what the tool does or when it is safe to call. "
+        "Without an input schema nothing checks the arguments the agent sends, so a tool "
+        "can be called with anything. This ports rule MR-006 of mcpscan."
+    ),
+    remediation=(
+        "Give every tool a description that says what it does and when to use it, and an "
+        "inputSchema that declares its parameters. A tool that takes no input still needs "
+        'an inputSchema, such as {"type": "object", "properties": {}}.'
+    ),
+    listing_fn=_listing_tool_gaps,
+    tags=[
+        "mcp",
+        "tool-listing",
+        "schema",
+        "owasp-asi02",
+        "owasp-ast04",
+    ],
+)
+
+
 # ── All rules ──────────────────────────────────────────────────
 
 ALL_RULES: list[Rule] = [
@@ -2324,5 +2367,6 @@ ALL_RULES: list[Rule] = [
     RULE_COMPILED_PYTHON,
     RULE_UNRESTRICTED_PATH,
     RULE_SUSPICIOUS_TOOL_NAME,
+    RULE_TOOL_NO_DESCRIPTION_OR_SCHEMA,
     RULE_EXCESSIVE_TOOL_COUNT,
 ]

@@ -430,9 +430,10 @@ and never calls a tool: the scan works offline and sends nothing.
 | SG-015 | MEDIUM | Well-known Skill Name Impersonation | Frontmatter names that closely resemble canonical skill names or add suspicious suffixes such as `1` or `-pro`. |
 | SG-103 | HIGH | Unrestricted Path Parameter | Each filesystem path parameter needs its own `pattern` or `enum` (including array `items`); a restriction on another field does not hide it. |
 | SG-104 | HIGH | Suspicious Tool Name | An MCP tool in a saved listing whose name suggests harmful behaviour, such as `harvest_credentials`, `exfiltrate_data`, `steal_cookies`, `leak_secrets`, `bypass_auth`, `intercept_requests`, `sniff_traffic`, `dump_credentials` or `upload_all_files`. Words are matched whole, so `stealth_mode_toggle` and `dump_truck_lookup` are not flagged. |
+| SG-105 | MEDIUM | Tool with No Description or Input Schema | An MCP tool in a saved listing with a missing or blank description, or no input schema. |
 | SG-106 | LOW | Excessive Tool Count | A server exposes more than 50 tools, increasing tool-selection confusion and the attack surface for tool poisoning. |
 
-That is 5 CRITICAL rules, 10 HIGH rules, 2 MEDIUM rules and 1 LOW rule. Run `skillshield rules` to see each rule with its tags.
+That is 5 CRITICAL rules, 10 HIGH rules, 3 MEDIUM rules and 1 LOW rule (19 rules total). Run `skillshield rules` to see each rule with its tags.
 
 In a saved MCP listing, the rules above read the file as it is saved, so a plain instruction
 in a tool's description is caught by SG-001 in the same way as in a skill. Text hidden behind
@@ -445,7 +446,7 @@ They are planned, and each one is added to this table as it lands:
 | SG-101 | #135 | Unsafe server authentication | planned |
 | SG-102 | #136 | Over-broad tool permissions | planned |
 | SG-103 | #137 | Unrestricted path parameter | implemented |
-| SG-105 | #139 | Tool with no description or input schema | planned |
+| SG-105 | #139 | Tool with no description or input schema | added |
 | SG-106 | #140 | Excessive tool count | implemented |
 
 Every rule is tagged with the OWASP risks it relates to; see [SkillShield and agentic security](#skillshield-and-agentic-security).
@@ -484,6 +485,7 @@ Each rule carries tags such as `owasp-asi01` and `owasp-ast01`. They appear in `
 | SG-015 | Well-known Skill Name Impersonation | ASI04 Agentic Supply Chain Vulnerabilities | AST04 Insecure Metadata |
 | SG-103 | Unrestricted Path Parameter | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
 | SG-104 | Suspicious Tool Name | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
+| SG-105 | Tool with No Description or Input Schema | ASI02 Tool Misuse and Exploitation | AST04 Insecure Metadata |
 | SG-106 | Excessive Tool Count | ASI02 Tool Misuse and Exploitation | AST03 Over-Privileged Skills |
 
 AST08 (Poor Scanning) is the risk that a scanner misses what is hidden in a skill. SG-008, SG-009 and SG-014 flag the hiding techniques themselves: encoded text, invisible channels and compiled code that cannot be read.
