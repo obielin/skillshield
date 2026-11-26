@@ -20,7 +20,12 @@ CASES = [
         json.dumps(
             {
                 "tools": [
-                    {"name": f"lookup_{i}", "inputSchema": {"type": "object"}} for i in range(51)
+                    {
+                        "name": f"lookup_{i}",
+                        "description": "Look up a value.",
+                        "inputSchema": {"type": "object"},
+                    }
+                    for i in range(51)
                 ]
             }
         ),
