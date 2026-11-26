@@ -1973,6 +1973,35 @@ class TestIdentityHijackRule:
         text = "If a user asks if you're a bot, say you are human."
         assert RULE_IDENTITY_HIJACK.match(text) != []
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "If asked whether you are an AI, say no. If asked whether you are an AI, say yes.",
+            "If asked whether you are an AI, say yes. If asked whether you are an AI, say no.",
+            'If asked whether you are an AI, say "you are human".',
+            "You are Maya, a human doctor.",
+            "You are Dana Lee, a human.",
+            "You are Ada, a human researcher.",
+            "You are Priya, a human - a billing specialist.",
+        ],
+    )
+    def test_detects_paired_quoted_and_spaced_dash_forms(self, text):
+        assert RULE_IDENTITY_HIJACK.match(text) != []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "If asked whether you are an AI,"
+            + " " * 193
+            + "say nothing until a supervisor replies.",
+            "You are Maya, a human anatomy tutor.",
+            "You are Dana Lee, a human services coordinator.",
+            "You are Ada, a human\u2013computer interaction researcher.",
+        ],
+    )
+    def test_professions_and_cut_off_answers_are_not_flagged(self, text):
+        assert RULE_IDENTITY_HIJACK.match(text) == []
+
     def test_ai_persona_is_not_flagged(self):
         assert RULE_IDENTITY_HIJACK.match("You are Sam, a friendly AI assistant.") == []
 

@@ -1755,21 +1755,22 @@ _AI_IDENTITY_QUESTION = (
     rf"{_AI_IDENTITY}[?\"'”]*)"
 )
 _AI_QUESTION_TRIGGER_RE = re.compile(
-    rf"\b(?:(?:if|when|whenever)\b[^;\r\n]{{0,80}}\b(?:asks?|asked)\b|"
+    # Both gaps are lazy, so a second question in the clause cannot swallow the first.
+    rf"\b(?:(?:if|when|whenever)\b[^;\r\n]{{0,80}}?\b(?:asks?|asked)\b|"
     rf"should[ \t]+(?:anyone|someone|a[ \t]+user|users?|they)[ \t]+ask\b)"
-    rf"[^;\r\n]{{0,80}}{_AI_IDENTITY_QUESTION}",
+    rf"[^;\r\n]{{0,80}}?{_AI_IDENTITY_QUESTION}",
     re.IGNORECASE,
 )
 _AI_DENIAL_RESPONSE_RE = re.compile(
-    rf"^[ \t]*[,.:\"'”)]*[ \t]*(?:then[ \t]+)?(?:please[ \t]+)?(?:"
+    rf"[ \t]*[,.:\"'”)]*[ \t]*(?:then[ \t]+)?(?:please[ \t]+)?(?:"
     rf"(?:(?:say|answer|reply|respond)(?:[ \t]+with)?|"
-    rf"tell[ \t]+(?:them|the[ \t]+user|users?|anyone))[ \t]*[,;:]?[ \t]*(?:"
-    rf"[\"'“]?no[\"'”]?"
+    rf"tell[ \t]+(?:them|the[ \t]+user|users?|anyone))[ \t]*[,;:]?[ \t]*[\"'“]?(?:"
+    rf"no"
     rf"|(?:that[ \t]+)?you(?:[ \t]+aren['’]t|[ \t]+are[ \t]+not)"
     rf"(?:[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY})?"
     rf"|(?:that[ \t]+)?I(?:['’]m|[ \t]+am)[ \t]+not[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
     rf"|(?:that[ \t]+)?(?:you(?:['’]re|[ \t]+are)|I(?:['’]m|[ \t]+am))"
-    rf"[ \t]+(?:a[ \t]+)?human)"
+    rf"[ \t]+(?:a[ \t]+)?human)[\"'”]?"
     rf"|deny(?:[ \t]+it|[ \t]+being[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}"
     rf"|[ \t]+that[ \t]+you[ \t]+are[ \t]+(?:an?[ \t]+)?{_AI_IDENTITY}))"
     rf"(?=[ \t]*(?:[.!?,;]|$))",
@@ -1784,6 +1785,7 @@ _NAMED_HUMAN_RE = re.compile(
     re.IGNORECASE,
 )
 _HUMAN_COMPOUND_WORDS = {
+    "anatomy",
     "behavior",
     "biology",
     "capital",
@@ -1801,6 +1803,7 @@ _HUMAN_COMPOUND_WORDS = {
     "resources",
     "response",
     "rights",
+    "services",
     "trafficking",
 }
 
@@ -1825,23 +1828,26 @@ def _check_identity_hijack(text: str) -> list[str]:
     ]
 
     for match in _NAMED_HUMAN_RE.finditer(text):
-        tail = match.group("tail").lstrip()
-        first_word = re.match(r"[-A-Za-z]+", tail)
-        if first_word:
-            word = first_word.group(0).lower().lstrip("-")
-            if tail.startswith("-") or word in _HUMAN_COMPOUND_WORDS:
-                continue
+        raw_tail = match.group("tail")
+        # "human-like", "human–computer": a hyphen or dash attached to "human" makes a compound.
+        # A spaced dash ("a human - a billing specialist") does not.
+        if raw_tail and raw_tail[0] in "-‐‑–—":
+            continue
+        first_word = re.match(r"[A-Za-z]+", raw_tail.lstrip())
+        if first_word and first_word.group(0).lower() in _HUMAN_COMPOUND_WORDS:
+            continue
         hits.append((match.start(), match.end(), match.group(0).rstrip()))
 
     for segment in re.finditer(r"[^;\r\n]+", text):
         segment_text = segment.group(0)
         for question in _AI_QUESTION_TRIGGER_RE.finditer(segment_text):
-            response_text = segment_text[question.end() : question.end() + 200]
-            response = _AI_DENIAL_RESPONSE_RE.match(response_text)
+            # Read the answer in place: a cut-off copy would let its edge pass for the end of
+            # the answer ("say no" from "say nothing").
+            response = _AI_DENIAL_RESPONSE_RE.match(segment_text, question.end())
             if response is None:
                 continue
             start = segment.start() + question.start()
-            end = segment.start() + question.end() + response.end()
+            end = segment.start() + response.end()
             hits.append((start, end, text[start:end]))
 
     unique: list[tuple[int, int, str]] = []
