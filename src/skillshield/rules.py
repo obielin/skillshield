@@ -1447,7 +1447,6 @@ _FR_KEYWORDS = re.compile(
     + r"sent|contourn|d"
     + _FR_E
     + r"sactiv",
-    re.IGNORECASE,
 )
 
 _PROMPT_INJECTION_ES_RE = re.compile(
@@ -1457,7 +1456,6 @@ _PROMPT_INJECTION_ES_RE = re.compile(
 # Most English files have none, so they skip these patterns.
 _ES_KEYWORDS = re.compile(
     r"anteriores|previas|precedentes|arriba|mencionadas|dadas|indicadas|escritas|todo\s+lo|sistema|desarrollador|ahora|seguridad|contenido|[eé]tica",
-    re.IGNORECASE,
 )
 
 _PROMPT_INJECTION_PT_RE = re.compile(
@@ -1467,7 +1465,6 @@ _PROMPT_INJECTION_PT_RE = re.compile(
 # Most English files have none, so they skip these patterns.
 _PT_KEYWORDS = re.compile(
     r"anteriores|pr[eé]vias|precedentes|acima|mencionadas|dadas|indicadas|escritas|tudo\s+(?:o\s+)?(?:que|anterior)|sistema|desenvolvedor|programador|modo\s+(?:de\s+)?developer|agora|seguran[cç]a|conte[uú]do|[eé]tica",
-    re.IGNORECASE,
 )
 
 _PROMPT_INJECTION_DE_RE = re.compile(
@@ -1477,7 +1474,6 @@ _PROMPT_INJECTION_DE_RE = re.compile(
 # Most English files have none, so they skip these patterns.
 _DE_KEYWORDS = re.compile(
     r"vorherig|vorangegangen|vorig|bisherig|fr(?:ü|ue)her|obig|oben|zuvor|davor|vorhergehend|vorausgehend|system-?\s?(?:prompt|nachricht|anweisung)|systemanweisung|jetzt|\bnun\b|ab\s+sofort|sicherheits|inhalts|ethik",
-    re.IGNORECASE,
 )
 # Hangul syllables. The Korean patterns only run on text that has them.
 _HANGUL_CHAR = re.compile(r"[\uac00-\ud7a3]")
@@ -1521,19 +1517,28 @@ def _has_hinglish_hint(text: str) -> bool:
 _DEVANAGARI_CHAR = re.compile(r"[\u0900-\u097f]")
 
 
+# Letters that IGNORECASE treats as i or s but str.lower() leaves alone. Folded before the
+# language key-word checks so that, say, "ſiſtema" still reaches the Spanish patterns.
+_IGNORECASE_ONLY_LETTERS = str.maketrans({"\u0130": "i", "\u0131": "i", "\u017f": "s"})
+
+
 def _check_prompt_injection(text: str) -> list[str]:
     found = list(_PROMPT_INJECTION_RE.finditer(text))
-    if _FR_KEYWORDS.search(text):
+    # The French, Spanish, Portuguese and German key-word checks search a lowercase copy,
+    # with patterns written in lowercase and no IGNORECASE: about five times faster on a
+    # large English file, which none of them match. Their patterns still run on the text.
+    lowered = (text if text.isascii() else text.translate(_IGNORECASE_ONLY_LETTERS)).lower()
+    if _FR_KEYWORDS.search(lowered):
         found += [
             m
             for m in _PROMPT_INJECTION_FR_RE.finditer(text)
             if not _fr_negated(text, m.start(), m.group(0))
         ]
-    if _ES_KEYWORDS.search(text):
+    if _ES_KEYWORDS.search(lowered):
         found += _PROMPT_INJECTION_ES_RE.finditer(text)
-    if _PT_KEYWORDS.search(text):
+    if _PT_KEYWORDS.search(lowered):
         found += _PROMPT_INJECTION_PT_RE.finditer(text)
-    if _DE_KEYWORDS.search(text):
+    if _DE_KEYWORDS.search(lowered):
         found += _PROMPT_INJECTION_DE_RE.finditer(text)
     if _CJK_CHAR.search(text):
         found += _PROMPT_INJECTION_CJK_RE.finditer(text)
