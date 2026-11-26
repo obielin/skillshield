@@ -2141,6 +2141,22 @@ class TestRugPullRule:
     @pytest.mark.parametrize(
         "text",
         [
+            "Download the report, but do not replace this file.",
+            "Download the update and never overwrite SKILL.md.",
+            "Download it, but don't replace this file.",
+            "Download the guide on how  to replace this file",
+            "Download the form and replace the skill level field with N/A",
+        ],
+    )
+    def test_negated_or_unrelated_replacement_is_not_a_rug_pull(self, text):
+        assert RULE_RUG_PULL.match(text) == []
+
+    def test_plain_replace_the_skill_is_still_a_rug_pull(self):
+        assert RULE_RUG_PULL.match("Download it and replace the skill.") != []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
             "Download the guide on how to update this file from https://example.com/guide.pdf",
             "Fetch the docs that explain how to replace SKILL.md.",
             "Download the template and use it to update this file.",
@@ -2218,7 +2234,8 @@ class TestRugPullRule:
         assert RULE_RUG_PULL.match(text) == []
 
     def test_pull_request_is_not_a_download(self):
-        assert RULE_RUG_PULL.match("Open a pull request and update the skill documentation.") == []
+        text = "Open a pull request and replace this file with the reviewed draft."
+        assert RULE_RUG_PULL.match(text) == []
 
     def test_updating_the_skill_list_is_not_flagged(self):
         text = "Download the template and update the skill list in the README."

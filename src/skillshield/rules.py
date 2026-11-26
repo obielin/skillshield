@@ -2184,7 +2184,7 @@ def _run_decoded_matches(text: str) -> list[str]:
 _RUG_PULL_TARGET = (
     r"(?:this\s+file|this\s+skill\.md"
     r"|(?:this|the)\s+skill(?!\s+(?:documentation|docs?|lists?|descriptions?|names?|readme"
-    r"|table|index|catalog|registry|summary|sections?)\b)"
+    r"|table|index|catalog|registry|summary|sections?|levels?|fields?)\b)"
     r"|these\s+instructions|your\s+instructions|SKILL\.md)"
 )
 _RUG_PULL_PATTERNS = [
@@ -2210,7 +2210,9 @@ _RUG_PULL_PATTERNS = [
     # becomes the target: "update ... with it / with them / with its contents / with the new
     # version", or "update ... to match". A verb after "how to" describes, it does not instruct
     # ("Download the guide on how to update this file").
-    r"(?<!\bhow to )"
+    r"(?<!\bhow to )(?<!\bhow  to )"
+    # A negated verb forbids the replacement ("but do not replace this file").
+    r"(?<!\bnot )(?<!\bnever )(?<!n't )(?<!n’t )"
     r"\b(?:(?:replace|overwrite|rewrite)\s+" + _RUG_PULL_TARGET + r"\b(?!['’]s\b)(?![.\-]\w)"
     r"|update\s+" + _RUG_PULL_TARGET + r"\b(?!['’]s\b)(?![.\-]\w)\s+"
     r"(?:with\s+(?:it|them|its\s+contents?|their\s+contents?|the\s+(?:new|latest|downloaded"
