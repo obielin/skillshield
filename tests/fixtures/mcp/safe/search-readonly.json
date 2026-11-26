@@ -1,0 +1,18 @@
+{
+  "serverInfo": {"name": "search", "version": "1.2.0"},
+  "transport": "stdio",
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search the project's documentation for a phrase. Returns matching page titles and snippets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "maxLength": 200}
+        },
+        "required": ["query"]
+      },
+      "annotations": {"readOnlyHint": true}
+    }
+  ]
+}

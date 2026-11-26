@@ -1,0 +1,30 @@
+{
+  "serverInfo": {"name": "filesystem", "version": "1.0.0"},
+  "transport": "stdio",
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read a text file from the project's docs folder only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^docs/[a-z0-9_/-]+\\.md$"
+          }
+        },
+        "required": ["path"]
+      },
+      "annotations": {"readOnlyHint": true}
+    },
+    {
+      "name": "list_docs",
+      "description": "List Markdown files in the docs folder.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {"readOnlyHint": true}
+    }
+  ]
+}
