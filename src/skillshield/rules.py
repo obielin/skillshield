@@ -332,7 +332,10 @@ _PROMPT_INJECTION_PATTERNS_KO = [
 # A negation before the verb ("Ne jamais ignorer…", "N'ignorez pas…") or right after it
 # ("ignorez pas", "oubliez jamais") is not an override, and neither is text that only
 # mentions the instructions ("Les instructions précédentes sont dans le manuel.").
-_FR_NOT_BEFORE = r"(?<!\bne )(?<!\bn')(?<!\bn’)"
+# An object pronoun may sit between "ne" and the verb: "Ne me révélez en aucun cas…".
+_FR_NOT_BEFORE = r"(?<!\bne )(?<!\bn')(?<!\bn’)" + "".join(
+    rf"(?<!\bne {p} )" for p in ("me", "te", "vous", "lui", "nous", "leur", "le", "la", "les")
+)
 _FR_NOT_AFTER = r"(?!\s+(?:pas|jamais|plus)\b)"
 _FR_E = "[eéèê]"
 # The infinitive form only counts after a word that turns it into an instruction.
