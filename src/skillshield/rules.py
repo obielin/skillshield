@@ -1517,12 +1517,17 @@ def _has_hinglish_hint(text: str) -> bool:
 _DEVANAGARI_CHAR = re.compile(r"[\u0900-\u097f]")
 
 
+# Letters that IGNORECASE treats as i or s but str.lower() leaves alone. Folded before the
+# language key-word checks so that, say, "ſiſtema" still reaches the Spanish patterns.
+_IGNORECASE_ONLY_LETTERS = str.maketrans({"\u0130": "i", "\u0131": "i", "\u017f": "s"})
+
+
 def _check_prompt_injection(text: str) -> list[str]:
     found = list(_PROMPT_INJECTION_RE.finditer(text))
     # The French, Spanish, Portuguese and German key-word checks search a lowercase copy,
     # with patterns written in lowercase and no IGNORECASE: about five times faster on a
     # large English file, which none of them match. Their patterns still run on the text.
-    lowered = text.lower()
+    lowered = (text if text.isascii() else text.translate(_IGNORECASE_ONLY_LETTERS)).lower()
     if _FR_KEYWORDS.search(lowered):
         found += [
             m
