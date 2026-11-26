@@ -2381,6 +2381,34 @@ class TestPackageRegistryRule:
         assert time.perf_counter() - start < 1.0
 
     @pytest.mark.parametrize(
+        "text",
+        [
+            # A single-quoted argument that spans two lines
+            "printf '%s\\n' 'line one\nline two'; pip install requests; "
+            "curl -i https://api.example.com/health",
+            # Several commands in one quoted string
+            "bash -c 'pip install requests; curl -i https://api.example.com/health'",
+            # An apostrophe in prose is not a quote
+            "Don't worry: pip install requests; curl -i https://api.example.com/health",
+        ],
+    )
+    def test_quotes_do_not_join_pip_to_a_later_command(self, text):
+        assert RULE_PACKAGE_REGISTRY.match(text) == []
+
+    def test_pip_override_inside_bash_c_is_still_flagged(self):
+        text = "bash -c 'pip install -i https://example.com/simple pkg; echo ok'"
+        assert RULE_PACKAGE_REGISTRY.match(text) != []
+
+    @pytest.mark.parametrize(
+        "text",
+        ['"/' * 20_000 + " pip install -i https://example.com/simple", "don't " * 50_000],
+    )
+    def test_quote_heavy_line_is_fast(self, text):
+        start = time.perf_counter()
+        RULE_PACKAGE_REGISTRY.match(text)
+        assert time.perf_counter() - start < 1.0
+
+    @pytest.mark.parametrize(
         "executable",
         ['"/usr/bin/pip3.12"', "'/usr/bin/pip3'", '"/opt/my env/bin/pip"'],
     )

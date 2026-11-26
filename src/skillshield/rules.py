@@ -2639,6 +2639,12 @@ _PIP_INSTALL = re.compile(
     r")[ \t]+install\b",
     re.IGNORECASE,
 )
+_QUOTED_PIP_PATH = re.compile(
+    r"(?<![^\s'\"(`])"
+    rf'"[^"\r\n]*/{_PIP_EXECUTABLE}"'
+    rf"|(?<![^\s'\"(`])'[^'\r\n]*/{_PIP_EXECUTABLE}'",
+    re.IGNORECASE,
+)
 _PIP_SHORT_I = re.compile(r"(?:^|[ \t])-i[ \t]*(?:=[ \t]*)?['\"]?(https?://[^\s'\"`]+)")
 _SHELL_SEPARATORS = ";|&\n"
 
@@ -2649,47 +2655,31 @@ def _pip_short_flag_matches(text: str) -> list[tuple[str, str]]:
     # Walk each line once and cut it into commands, so a line with many
     # "pip install" tokens is still scanned in linear time.
     for line in text.splitlines(keepends=True):
+        in_path = _quoted_pip_path_positions(line)
         start = 0
-        quote = None
-        escaped = False
-        substitutions = []
-        substitution_open = False
         for index, char in enumerate(line):
-            if escaped:
-                escaped = False
-                continue
-            if char == "\\" and quote != "'":
-                escaped = True
-                continue
-            if substitution_open:
-                substitution_open = False
-                continue
-            if quote != "'" and char == "$" and line[index + 1 : index + 2] == "(":
-                substitutions.append([1, quote])
-                quote = None
-                substitution_open = True
-                continue
-            if not quote and substitutions:
-                if char == "(":
-                    substitutions[-1][0] += 1
-                elif char == ")":
-                    substitutions[-1][0] -= 1
-                    if substitutions[-1][0] == 0:
-                        quote = substitutions.pop()[1]
-                        continue
-            if quote:
-                if char == quote:
-                    quote = None
-                continue
-            if char in "'\"":
-                quote = char
-                continue
-            if char not in _SHELL_SEPARATORS:
+            if char not in _SHELL_SEPARATORS or index in in_path:
                 continue
             matches.extend(_command_pip_short_flag_matches(line[start:index]))
             start = index + 1
         matches.extend(_command_pip_short_flag_matches(line[start:]))
     return matches
+
+
+def _quoted_pip_path_positions(line: str) -> set[int]:
+    """Return the positions in line that are inside a quoted pip path.
+
+    A separator there ("/opt/a;b/bin/pip" install) is part of the path. Every other separator
+    ends the command, quoted or not: an apostrophe in prose ("Don't") does not open a string, a
+    quote can span lines, and "bash -c '…; …'" holds several commands.
+    """
+    if '"' not in line and "'" not in line:
+        return set()
+    return {
+        index
+        for match in _QUOTED_PIP_PATH.finditer(line)
+        for index in range(match.start(), match.end())
+    }
 
 
 def _command_pip_short_flag_matches(command: str) -> list[tuple[str, str]]:
