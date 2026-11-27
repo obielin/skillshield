@@ -741,6 +741,8 @@ jobs:
           path: skills
 ```
 
+**Choosing a version.** `@v1` always runs the latest 1.x release, so new rules reach your workflow without any change on your side. That keeps you protected, but a minor release can catch something the last one missed and fail a scan that passed before; each release's upgrade notes in the [changelog](CHANGELOG.md) say what to expect. To upgrade on your own schedule, pin a release, such as `@v1.4.0`, and move the pin when you're ready. To try a new release without failing the build, set `fail-on: none` for a run: the findings still appear in the job summary and as annotations.
+
 With the default `fail-on: high`, the step fails when any file is HIGH or CRITICAL; `fail-on: critical` fails on CRITICAL only, and `fail-on: medium` or `low` also fails the lower severities. A file counts as HIGH if its risk level is HIGH or it has a HIGH finding, so one HIGH finding fails the step even when its score alone would rate it MEDIUM. Flagged files are shown as annotations on the pull request and listed in the job summary. The log annotates the 50 worst files and the summary lists the same 50, plus up to 20 skipped paths with paths outside tooling directories first; the total counts stay in the table, and any list longer than that ends with `... and N more, not listed here`. Every list in the summary is capped and the totals stay in the table, which keeps the summary small on a scan with thousands of skipped or unreadable files. The caps limit how many entries are listed, not the length of each: a path or message is written as it is, so one very long path still takes its full width.
 
 | Input | Default | What it does |
