@@ -65,7 +65,7 @@ Rule IDs (`SG-001` to `SG-012`) have not changed. SARIF output now names the too
 
 The `skillguard` package on PyPI, and `skill-guard`, are other people's projects, not this one.
 
-- Version 1.3.0
+- Version 1.4.0
 - Python 3.10 or later
 - No runtime dependencies
 - MIT licence
