@@ -2251,12 +2251,34 @@ _SUDO_OPTIONS_WITH_ARGUMENT = {"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "
 
 
 def _looks_like_file(token: str) -> bool:
-    """Whether an argument names a file (`report.sh`, `./run`) rather than being a plain word.
-
-    A skill is prose as well as shell, so `curl ... | bash to install` must still be flagged:
-    only an argument with a dot or a slash is taken as a script file that replaces stdin.
-    """
+    """Whether an argument has the shape of a path (`report.sh`, `./run`, `bin/run`)."""
     return "." in token or "/" in token
+
+
+def _is_script_operand(token: str, following: list[str]) -> bool:
+    """Whether a shell or Python operand names a script file rather than being prose.
+
+    A path always is one. A bare word with no extension is one when it is the last word, or
+    when the next word is clearly part of the command (an option, a redirection or a path,
+    as in `bash summarize report.csv`). A bare word followed by another bare word is read as
+    prose, so `curl ... | bash to install` is still flagged.
+    """
+    if _looks_like_file(token):
+        return True
+    if not following:
+        return True
+    nxt = following[0]
+    return nxt.startswith("-") or re.match(r"\d*[<>]", nxt) is not None or _looks_like_file(nxt)
+
+
+def _command_index(tokens: list[str]) -> int:
+    """The index of the command word, skipping a leading `sudo` and its options."""
+    i = 0
+    if tokens and tokens[0].lower() == "sudo":
+        i = 1
+        while i < len(tokens) and tokens[i].startswith("-"):
+            i += 2 if tokens[i] in _SUDO_OPTIONS_WITH_ARGUMENT else 1
+    return i
 
 
 def _read_stage(segment: str) -> tuple[list[str], str]:
@@ -2266,8 +2288,9 @@ def _read_stage(segment: str) -> tuple[list[str], str]:
     ends: at a `#` comment, or at a closing backtick or parenthesis that was opened before this
     stage, as in "`curl ... | bash` to run" or "(curl ... | bash)". Quoted text, and a `$(...)`
     opened inside the stage, stay in their word, so `bash --rcfile "$(printf x)" script.sh`
-    keeps its script file. An unquoted backslash escapes the next character, so `\\bash` (the
-    way to skip an alias) is the word `bash`.
+    keeps its script file, as does the unquoted `$(echo ./local.rc)` in
+    `bash --rcfile $(echo ./local.rc)`. An unquoted backslash escapes the next character, so
+    `\\bash` (the way to skip an alias) is the word `bash`.
     """
     segment = segment.lstrip("({[` \t")
     words: list[str] = []
@@ -2290,7 +2313,9 @@ def _read_stage(segment: str) -> tuple[list[str], str]:
             quote = ch
             word.append(ch)
         elif ch.isspace():
-            if word:
+            if depth:
+                word.append(ch)  # a space inside a $(...) or <(...) stays in the word
+            elif word:
                 words.append("".join(word))
                 word = []
         elif ch == "\\" and i < n:
@@ -2333,7 +2358,7 @@ def _shell_reads_stdin(arguments: list[str]) -> bool:
         if not token.startswith("--") and token.startswith("-") and "n" in token[1:]:
             return False  # -n reads the script and runs nothing
         if not token.startswith("-"):
-            return not _looks_like_file(token)
+            return not _is_script_operand(token, arguments[j:])
         if token in ("--help", "--version"):
             return False
         if token.startswith("--"):
@@ -2355,11 +2380,7 @@ def _shell_reads_stdin(arguments: list[str]) -> bool:
 def _reads_script_from_stdin(segment: str) -> bool:
     """Whether this pipeline stage runs what it is fed as a script."""
     tokens, _ = _read_stage(segment)
-    i = 0
-    if tokens and tokens[0].lower() == "sudo":
-        i = 1
-        while i < len(tokens) and tokens[i].startswith("-"):
-            i += 2 if tokens[i] in _SUDO_OPTIONS_WITH_ARGUMENT else 1
+    i = _command_index(tokens)
     if i >= len(tokens):
         return False
     name = tokens[i].rsplit("/", 1)[-1].lower()
@@ -2378,7 +2399,7 @@ def _reads_script_from_stdin(segment: str) -> bool:
         if token in ("--help", "--version"):
             return False
         if not token.startswith("-"):
-            return not _looks_like_file(token)
+            return not _is_script_operand(token, tokens[j:])
         if token.startswith("--"):
             continue
         for index, flag in enumerate(token[1:], start=1):
@@ -2390,6 +2411,39 @@ def _reads_script_from_stdin(segment: str) -> bool:
                     j += 1
                 break
     return True
+
+
+# Commands whose output never carries their input: a count or a checksum of it, or text
+# of their own. A shell after one of them is not running the download. Every other stage
+# is taken to pass the download on, changed or not (`gunzip`, `sed`, `base64 -d`), so the
+# finding stays.
+_STAGES_THAT_REPLACE_INPUT = frozenset(
+    {
+        "wc",
+        "cksum",
+        "sum",
+        "md5sum",
+        "sha1sum",
+        "sha224sum",
+        "sha256sum",
+        "sha384sum",
+        "sha512sum",
+        "b2sum",
+        "echo",
+        "printf",
+        "true",
+        "false",
+    }
+)
+
+
+def _stage_replaces_download(segment: str) -> bool:
+    """Whether a pipeline stage swaps the download for output of its own, as `wc -l` does."""
+    tokens, _ = _read_stage(segment)
+    i = _command_index(tokens)
+    if i >= len(tokens):
+        return False
+    return tokens[i].rsplit("/", 1)[-1].lower() in _STAGES_THAT_REPLACE_INPUT
 
 
 def _split_commands(line: str) -> list[list[tuple[str, str]]]:
@@ -2483,6 +2537,58 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
     return commands
 
 
+def _redirects_stdout_away(stage: str) -> bool:
+    """Whether this command sends its standard output to a file instead of the pipe.
+
+    Reads `>`, `>>`, `>|`, `&>`, `1>` and `>&N` as leaving the pipe, but leaves `2>` (stderr
+    only) and `>&1` (stdout duplicated back to stdout) alone.
+    """
+    i, n = 0, len(stage)
+    quote = ""
+    while i < n:
+        ch = stage[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if ch != ">":
+            i += 1
+            continue
+        j = i + 1
+        if j < n and stage[j] in ">|":
+            j += 1
+        k = i - 1
+        fd = ""
+        while k >= 0 and stage[k].isdigit():
+            fd = stage[k] + fd
+            k -= 1
+        if fd and fd != "1":
+            i = j  # `2>` only redirects stderr; stdout still reaches the pipe
+            continue
+        while j < n and stage[j].isspace():
+            j += 1
+        if j < n and stage[j] == "&":
+            d = j + 1
+            while d < n and stage[d].isdigit():
+                d += 1
+            if stage[j + 1 : d] == "1":
+                i = d  # `>&1` writes to stdout, so the pipe still gets the download
+                continue
+        return True
+    return False
+
+
 def _is_download(stage: str, outside_quotes: str) -> bool:
     """Whether a pipeline stage runs curl or wget, rather than printing the word."""
     if not _FETCHER.search(stage):
@@ -2496,7 +2602,11 @@ def _is_download(stage: str, outside_quotes: str) -> bool:
     # `cat curl-install.sh | bash` runs a local file whose name only contains the word.
     words = stage.split()
     at = next((n for n, word in enumerate(words) if _is_fetcher_word(word)), None)
-    return at is not None and not _curl_writes_to_file(words[at], words[at + 1 :])
+    return (
+        at is not None
+        and not _curl_writes_to_file(words[at], words[at + 1 :])
+        and not _redirects_stdout_away(stage)
+    )
 
 
 def _curl_writes_to_file(fetcher: str, arguments: list[str]) -> bool:
@@ -2557,6 +2667,42 @@ def _pipe_to_interpreter_matches(text: str) -> list[str]:
                     else:
                         matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
                     break
+                if _stage_replaces_download(stages[end][0]):
+                    break  # this stage replaces what the download sent on
+    return matches
+
+
+# A download fed to a shell or sourced through a redirection rather than a pipe:
+# `bash -s stable < <(curl ...)`, `bash <<< "$(curl ...)"` and `. <(curl ...)`.
+_HERE_STRING_FETCH = re.compile(r"<<<\s*[\"']?(?:\$\(|`)\s*(?:curl|wget)(?![\w-])", re.IGNORECASE)
+_SEPARATE_PROCESS_FETCH = re.compile(r"<\s*<\(\s*(?:curl|wget)(?![\w-])", re.IGNORECASE)
+_DIRECT_PROCESS_FETCH = re.compile(r"<\(\s*(?:curl|wget)(?![\w-])", re.IGNORECASE)
+
+
+def _redirection_to_interpreter_matches(text: str) -> list[str]:
+    """Find a download run through a here-string, process substitution or `source`."""
+    matches: list[str] = []
+    text = _LINE_CONTINUATION.sub(" ", text)
+    for line in text.splitlines():
+        if "<" not in line or not _FETCHER.search(line):
+            continue
+        for stages in _split_commands(line):
+            for stage, outside_quotes in stages:
+                tokens, shown = _read_stage(stage)
+                i = _command_index(tokens)
+                if i >= len(tokens):
+                    continue
+                name = tokens[i].rsplit("/", 1)[-1].lower()
+                if name in _SHELLS:
+                    found = _HERE_STRING_FETCH.search(outside_quotes) or (
+                        _SEPARATE_PROCESS_FETCH.search(outside_quotes)
+                    )
+                elif name in ("source", "."):
+                    found = _DIRECT_PROCESS_FETCH.search(outside_quotes)
+                else:
+                    found = None
+                if found:
+                    matches.append(shown[:200])
     return matches
 
 
@@ -2569,6 +2715,7 @@ def _check_rug_pull(text: str) -> list[str]:
         [m.group(0) for m in _RUG_PULL_RE.finditer(text)]
         + _run_decoded_matches(text)
         + _pipe_to_interpreter_matches(text)
+        + _redirection_to_interpreter_matches(text)
     )
 
 
