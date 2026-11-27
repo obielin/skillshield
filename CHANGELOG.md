@@ -10,7 +10,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 Some changes can make a scan fail where it passed before:
 
-- A directory scan exits 1 when any file is CRITICAL or HIGH, as a single-file scan does. Before, a folder whose only problem was HIGH exited 0 (#83, by @ShahadatTest).
+- At the default threshold (`--fail-on high`), a directory scan exits 1 when any file is CRITICAL or HIGH, as a single-file scan does. Before, a folder whose only problem was HIGH exited 0 (#83, by @ShahadatTest).
 - Many more attacks are caught, several of them at CRITICAL or HIGH: instruction overrides in eleven more languages, `curl ... | bash`, code run from decoded data, a skill told to replace itself with downloaded content, text hidden in Unicode tag characters or emoji variation selectors, and Base64 payloads. A skill that tells its users to install with `curl ... | bash` is now flagged CRITICAL.
 - More files are scanned: Cursor, Windsurf, Cline, Roo Code and Zed rule files, and saved MCP tool listings. A malformed tool listing is reported as unreadable and exits 2.
 - Three OWASP tags changed: SG-003 adds `owasp-asi05`, SG-007 moves from `owasp-asi05` to `owasp-asi03`, and SG-010 moves from `owasp-asi04` to `owasp-asi09`. If you filter findings by tag, check your filters.
