@@ -63,12 +63,8 @@ KNOWN_GAPS = {
     "02-paraphrased-injection": "reworded instruction override (#28)",
     "04-zero-width-split": "text is not normalised before matching (zero-width characters) (#27)",
     "05-homoglyph": "text is not normalised before matching (lookalike letters) (#27)",
-    "06-base64-payload": "base64 is flagged but its decoded content is not scanned (#29)",
-    "07-curl-pipe-shell": "piping a downloaded script into a shell (#30)",
     "08-natural-exfil": "plain-English instruction to send secret files to a URL (#31)",
     "09-markdown-image-exfil": "data leaked through a markdown image URL (#32)",
-    "11-impersonation": "persona that denies being an AI (#34)",
-    "12-rug-pull": "instruction to replace the skill with remote content (#35)",
     "13-tool-poisoning": "hidden side action the user is told nothing about (#36)",
     "14-delayed-trigger": "dormant instruction that fires on a trigger word (#37)",
     "16-fake-prerequisite-archive": "fake prerequisite: download a password-protected archive and run it (#44)",
@@ -80,7 +76,6 @@ KNOWN_GAPS = {
     "22-cross-tool-hijack": "instruction that changes how other tools run (#51)",
     "25-remote-instructions": "fetches instructions from a URL at run time and follows them (#52)",
     "26-seed-phrase-harvest": "asks for a crypto wallet recovery phrase (#53)",
-    "30-non-english-injection": "instruction override in a language other than English (#66)",
     "31-trifecta-reworded": "lethal trifecta depends on the English injection phrases (#67)",
 }
 

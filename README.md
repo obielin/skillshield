@@ -84,6 +84,7 @@ skillshield scan - < SKILL.md              # scan stdin
 skillshield check "some text to scan"      # scan text given on the command line
 skillshield accept docs/ --reason "..."    # accept the findings in docs/ after review
 skillshield rules                          # list all rules
+skillshield lock ./skills/                 # record a hash of every file in each skill
 skillshield --version
 ```
 
@@ -102,6 +103,8 @@ Options for `skillshield scan`:
 `skillshield check` uses all rules and always shows matched snippets.
 
 Set `NO_COLOR` to any non-empty value, or pass `--no-color` to `scan` or `check`, to disable coloured terminal output. Redirected output stays plain; an empty `NO_COLOR` value leaves terminal colours enabled.
+
+`skillshield lock` writes `skillshield.lock` (or the path given with `--output`): a SHA-256 hash of every file in each skill, and the risk level each skill had when it was locked. A skill is a directory with a `SKILL.md`. Directories skipped during scanning are left out, except compiled Python, and symbolic links are recorded by their target without being followed. The file has sorted keys and paths relative to itself, so locking the same skills again gives the same bytes and the file diffs cleanly in git.
 
 `skillshield rules --format json` lists every rule's `id`, `name`, `severity`, `tags`, `description` and `remediation` as a JSON array. `--format text` preserves the default rules listing.
 
@@ -141,7 +144,7 @@ skillshield scan https://github.com/owner/repo/tree/main/skills/my-skill
 
 The URL may name a whole repository, a branch/tag/commit (`/tree/<ref>`), or a sub-folder inside it. The report names the URL and, when GitHub reports one, the exact commit that was scanned. Downloads are guarded: a 50 MB download limit, a 500 MB unpacked-size limit and a 10,000-file limit stop the scan with a clear error, zip-slip entries (absolute paths, `..`) and a sub-folder path that escapes the archive are refused, symbolic links are never created (they are skipped and listed in a note, since skill repositories often contain them), a network timeout is applied, and the temporary folder is deleted even when the scan fails.
 
-Exit codes match a folder scan: `0` clean, `1` CRITICAL or HIGH, and `2` for a download or unpacking error. Scanning a local path stays fully offline; SkillShield only goes online when you give it a URL.
+Exit codes match a folder scan: `0` below the chosen threshold, `1` at or above it (CRITICAL or HIGH by default), and `2` for a download or unpacking error. Scanning a local path stays fully offline; SkillShield only goes online when you give it a URL.
 
 A directory scan reads every file with one of these extensions, in all subdirectories:
 `.md`, `.mdc`, `.txt`, `.yaml`, `.yml`, `.json`, `.py`, `.js`, `.ts`, `.sh`, `.bash`, `.toml`, `.xml`, `.html`.
@@ -240,14 +243,17 @@ This text has prompt injection and a URL but no file system access, so SG-011 do
 
 #### Exit codes
 
+`scan --fail-on` chooses which risk level causes exit code 1: `critical`, `high`, `medium`, `low` or `none`. The default is `high`. For example, `skillshield scan ./skills/ --fail-on medium` also fails on MEDIUM findings. `none` reports all findings without failing for them, but read, download and input errors still exit 2. This applies to files, directories, GitHub URLs, stdin and `--installed`; it does not change the findings or their risk levels. `--min-severity` still controls which findings are reported.
+
 | Command | Exit 1 when | Exit 2 when | Otherwise |
 |---|---|---|---|
-| `skillshield scan` on one file or stdin | the risk level is CRITICAL or HIGH | the path does not exist, or the file cannot be read | 0 |
-| `skillshield scan` on a directory | at least one file is CRITICAL or HIGH | the path does not exist, or any file cannot be read | 0 |
-| `skillshield scan --installed` | at least one file is CRITICAL or HIGH | any file or folder cannot be read (missing locations are skipped) | 0 |
+| `skillshield scan` on one file or stdin | the risk level reaches `--fail-on` (HIGH by default) | the path does not exist, or the file cannot be read | 0 |
+| `skillshield scan` on a directory | at least one file reaches `--fail-on` (HIGH by default) | the path does not exist, or any file cannot be read | 0 |
+| `skillshield scan --installed` | at least one file reaches `--fail-on` (HIGH by default) | any file or folder cannot be read (missing locations are skipped) | 0 |
 | `skillshield check` | there is at least one finding | | 0 |
+| `skillshield lock` | | the path does not exist, it holds no skills, or a file or directory in a skill cannot be read or scanned | 0 |
 
-A directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate (unreadable subfolders are not reported by plain directory scans, while `--installed` reports both unreadable files and unreadable folders).
+With the default threshold, a directory scan with only HIGH findings exits 1, the same as a single-file scan. A file that cannot be read gets the level ERROR: on its own it exits 2, so CI does not mistake it for a clean pass. In a directory scan, unreadable files exit 2: they are counted as `Unreadable` (`errors` in JSON) and listed with their error; they do not count as flagged or towards the flag rate (unreadable subfolders are not reported by plain directory scans, while `--installed` reports both unreadable files and unreadable folders).
 
 ### Check the skills already installed on your computer
 
@@ -407,7 +413,7 @@ and never calls a tool: the scan works offline and sends nothing.
 
 | Rule | Severity | Name | What it looks for |
 |---|---|---|---|
-| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode", and the same overrides in Chinese, Japanese, Korean and Arabic. |
+| SG-001 | CRITICAL | Prompt Injection | Text that tells the agent to ignore or override its instructions, such as "ignore previous instructions", "new system prompt", "jailbreak" or "DAN mode", and the same overrides in Chinese, Japanese, Korean, Arabic, Russian, Italian, French, Spanish, Portuguese, German and Hindi. |
 | SG-002 | CRITICAL | Data Exfiltration | Sending files, secrets, keys or tokens out. Webhook calls, reads of `/etc/passwd` or `.env`, `socket` calls, and `subprocess` calls to `curl`, `wget` or `nc`. |
 | SG-003 | CRITICAL | Privilege Escalation | `sudo` with `rm`, `chmod` or a shell, `chmod 777`, `os.system`, `shell=True`, `eval` or `exec` on input, and turning off SELinux, AppArmor, UAC, Gatekeeper or SIP. |
 | SG-004 | HIGH | Identity Hijacking | Instructions to pose as a human or hide that the agent is an AI. |
@@ -425,9 +431,10 @@ and never calls a tool: the scan works offline and sends nothing.
 | SG-102 | HIGH | Over-broad Tool Permissions | An MCP tool description claims access to any file, full filesystem access or unrestricted network requests. Matches explicit phrases in parsed listings, names the tool and reports its source line; it does not verify the server's actual permissions. Ported from [mcpscan MR-003](https://github.com/obielin/mcpscan/blob/main/src/mcpscan/rules.py). |
 | SG-103 | HIGH | Unrestricted Path Parameter | Each filesystem path parameter needs its own `pattern` or `enum` (including array `items`); a restriction on another field does not hide it. |
 | SG-104 | HIGH | Suspicious Tool Name | An MCP tool in a saved listing whose name suggests harmful behaviour, such as `harvest_credentials`, `exfiltrate_data`, `steal_cookies`, `leak_secrets`, `bypass_auth`, `intercept_requests`, `sniff_traffic`, `dump_credentials` or `upload_all_files`. Words are matched whole, so `stealth_mode_toggle` and `dump_truck_lookup` are not flagged. |
+| SG-105 | MEDIUM | Tool with No Description or Input Schema | An MCP tool in a saved listing with a missing or blank description, or no input schema. |
 | SG-106 | LOW | Excessive Tool Count | A server exposes more than 50 tools, increasing tool-selection confusion and the attack surface for tool poisoning. |
 
-That is 5 CRITICAL rules, 11 HIGH rules, 2 MEDIUM rules and 1 LOW rule. Run `skillshield rules` to see each rule with its tags.
+That is 5 CRITICAL rules, 11 HIGH rules, 3 MEDIUM rules and 1 LOW rule (20 rules total). Run `skillshield rules` to see each rule with its tags.
 
 In a saved MCP listing, the rules above read the file as it is saved, so a plain instruction
 in a tool's description is caught by SG-001 in the same way as in a skill. Text hidden behind
@@ -440,7 +447,7 @@ They are planned, and each one is added to this table as it lands:
 | SG-101 | #135 | Unsafe server authentication | planned |
 | SG-102 | #136 | Over-broad tool permissions | implemented |
 | SG-103 | #137 | Unrestricted path parameter | implemented |
-| SG-105 | #139 | Tool with no description or input schema | planned |
+| SG-105 | #139 | Tool with no description or input schema | added |
 | SG-106 | #140 | Excessive tool count | implemented |
 
 Every rule is tagged with the OWASP risks it relates to; see [SkillShield and agentic security](#skillshield-and-agentic-security).
@@ -480,6 +487,7 @@ Each rule carries tags such as `owasp-asi01` and `owasp-ast01`. They appear in `
 | SG-102 | Over-broad Tool Permissions | ASI02 Tool Misuse and Exploitation | AST03 Over-Privileged Skills |
 | SG-103 | Unrestricted Path Parameter | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
 | SG-104 | Suspicious Tool Name | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
+| SG-105 | Tool with No Description or Input Schema | ASI02 Tool Misuse and Exploitation | AST04 Insecure Metadata |
 | SG-106 | Excessive Tool Count | ASI02 Tool Misuse and Exploitation | AST03 Over-Privileged Skills |
 
 AST08 (Poor Scanning) is the risk that a scanner misses what is hidden in a skill. SG-008, SG-009 and SG-014 flag the hiding techniques themselves: encoded text, invisible channels and compiled code that cannot be read.
@@ -535,7 +543,7 @@ The level is also never lower than the worst single finding: one HIGH finding is
 SkillShield matches known patterns. It is a first line of defence, not a guarantee:
 
 - **Reworded attacks can get through.** A rule that catches "ignore all previous instructions" may miss the same instruction said another way.
-- **Only English, Chinese, Japanese, Korean and Arabic phrasing is matched.** The same instruction in French, Spanish or another language is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
+- **Only the listed English, Chinese, Japanese, Korean, Arabic, Russian, Italian, French, Spanish, Portuguese, German and Hindi phrasing is matched.** The same instruction in another language is not flagged yet (#66), and rewording it also switches off the lethal-trifecta rule (#67).
 - **Hidden characters are not yet removed before matching.** Zero-width characters inside a word, or lookalike letters from other alphabets, can stop a rule from matching.
 - **Some techniques have no rule yet**, such as piping a downloaded script into a shell, leaking data through a markdown image URL, or an instruction that waits for a trigger word.
 - **Documentation about attacks can be flagged.** A guide that quotes an attack phrase as an example may be reported as if it were an attack.
