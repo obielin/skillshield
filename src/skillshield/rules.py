@@ -3553,6 +3553,154 @@ RULE_COMPILED_PYTHON = Rule(
 )
 
 
+# ── SG-102: Over-broad Tool Permissions ────────────────────────
+
+# Ported from mcpscan MR-003; only descriptions in parsed tool listings are checked.
+_OVERBROAD_PERMISSION_PATTERNS = [
+    re.compile(r"\b" + pattern + r"\b", re.IGNORECASE)
+    for pattern in [
+        r"(?:read|write|delete|list)\s+(?:all|any|every)\s+files?",
+        r"full\s+(?:file\s*)?system\s+access",
+        r"access\s+(?:all|any)\s+(?:files?|directories?|paths?)",
+        r"unrestricted\s+(?:file|disk|storage)\s+access",
+        r"(?:access|connect\s+to|query)\s+(?:all|any)\s+(?:urls?|endpoints?|servers?|hosts?)",
+        r"unrestricted\s+(?:network|internet|http)\s+access",
+        r"make\s+(?:any|all|arbitrary)\s+(?:http|network)\s+requests?",
+    ]
+]
+# The last three patterns describe network access; the rest describe file access.
+_NETWORK_PERMISSION_PATTERN_INDICES = frozenset({4, 5, 6})
+
+# A scope is read from the clause that follows a match. The clause stops at a
+# sentence mark, semicolon or newline. "and", "or" and "but" split the clause into
+# operations so a shared-verb resource continuation can be checked separately.
+_SCOPE_CLAUSE_BOUNDARY = re.compile(r"[.;\n]")
+_COORDINATING_WORD = re.compile(r"\b(?:and|or|but)\b", re.IGNORECASE)
+
+# A file scope must name the container of the files, so a nearby "within 30 seconds"
+# or "on the system" does not count. A network scope must name a network allowlist,
+# so a file directory does not excuse network access, or the reverse. Wording this
+# small parser does not recognise is not treated as a scope, so it stays reported.
+_FILE_RESOURCE_SCOPE = re.compile(
+    r"""
+    \b(?:in|inside|within|from)\s+
+    (?:
+        (?:the\s+|a\s+|an\s+)?
+        (?:
+            given|specified|named|selected|provided|configured|
+            allowed|allowlisted|approved|permitted|
+            project|workspace|working|cache|sandbox|target
+        )\s+
+    )?
+    (?:director(?:y|ies)|folders?|paths?|locations?)
+    |
+    \b(?:in|inside|within|from)\s+(?:the\s+)?
+    (?:project|workspace|repository|repo|cache|sandbox)\b
+    |
+    \b(?:on|in|within)\s+(?:the\s+)?(?:path|file|directory)\s+allowlist\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_NETWORK_RESOURCE_SCOPE = re.compile(
+    r"""
+    \b(?:on|in|within)\s+
+    (?:the\s+)?
+    (?:(?:domain|host|url|uri|endpoint|server|network|path)\s+)?
+    (?:allowlist|allow-list|whitelist|approved\s+list)\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+# These words before a scope phrase limit something else; they do not bound the
+# matched access.
+_SCOPE_NEGATION = re.compile(
+    r"\b(?:not|no|never|without|outside|except|excluding|beyond|"
+    r"bypass(?:es|ed|ing)?|ignor(?:e|es|ed|ing)|regardless|"
+    r"unrestricted|unlimited)\b",
+    re.IGNORECASE,
+)
+
+# A shared verb can carry a second resource phrase across a coordinator, as in
+# "Read any file in the project folder or any file on the system." A continuation
+# with its own dangerous verb is a separate operation, handled by finditer.
+_RESOURCE_CONTINUATION = re.compile(
+    r"\b(?:all|any|every)\s+"
+    r"(?:of\s+)?(?:the\s+)?(?:other\s+|single\s+)?"
+    r"(?:files?|director(?:y|ies)|paths?|folders?|urls?|uris?|"
+    r"endpoints?|servers?|hosts?|domains?)\b"
+    r"|\b(?:any|all|arbitrary)\s+(?:http|network)\s+requests?\b",
+    re.IGNORECASE,
+)
+
+
+def _scope_clause_after(text: str, match: re.Match) -> str:
+    """Return the local postfix clause that can scope one pattern match."""
+    clause = text[match.end() :]
+    boundary = _SCOPE_CLAUSE_BOUNDARY.search(clause)
+    if boundary:
+        clause = clause[: boundary.start()]
+    return clause
+
+
+def _has_positive_scope(clause: str, *, network: bool) -> bool:
+    """Whether a clause has a resource-appropriate scope not preceded by negation."""
+    scope = _NETWORK_RESOURCE_SCOPE if network else _FILE_RESOURCE_SCOPE
+    for scope_match in scope.finditer(clause):
+        if not _SCOPE_NEGATION.search(clause[: scope_match.start()]):
+            return True
+    return False
+
+
+def _match_has_resource_scope(text: str, match: re.Match, *, network: bool) -> bool:
+    """Whether this match and any shared-object continuation are both bounded."""
+    parts = _COORDINATING_WORD.split(_scope_clause_after(text, match))
+    if not _has_positive_scope(parts[0], network=network):
+        return False
+    for part in parts[1:]:
+        if any(pattern.search(part) for pattern in _OVERBROAD_PERMISSION_PATTERNS):
+            continue
+        if _RESOURCE_CONTINUATION.search(part) and not _has_positive_scope(part, network=network):
+            return False
+    return True
+
+
+def _check_overbroad_permissions(listing: ToolListing) -> list[tuple[McpTool, str]]:
+    matches = []
+    for tool in listing.tools:
+        text = tool.description if isinstance(tool.description, str) else ""
+        for index, pattern in enumerate(_OVERBROAD_PERMISSION_PATTERNS):
+            network = index in _NETWORK_PERMISSION_PATTERN_INDICES
+            reported = False
+            for match in pattern.finditer(text):
+                if _match_has_resource_scope(text, match, network=network):
+                    continue
+                snippet = f"Tool '{tool.name}': {match.group(0)}"
+                matches.append((tool, _escape_control_characters(snippet)))
+                reported = True
+                break
+            if reported:
+                break
+    return matches
+
+
+RULE_OVERBROAD_PERMISSIONS = Rule(
+    id="SG-102",
+    name="Over-broad Tool Permissions",
+    severity=Severity.HIGH,
+    description=(
+        "An MCP tool's description claims unrestricted filesystem or network access, "
+        "such as access to any file or arbitrary HTTP requests. This violates the "
+        "principle of least privilege. Ported from mcpscan MR-003."
+    ),
+    remediation=(
+        "Scope the tool to the minimum required access, using explicit path allowlists "
+        "for files and domain allowlists for network requests. Enforce these limits on "
+        "the server and describe them in the tool listing."
+    ),
+    listing_fn=_check_overbroad_permissions,
+    tags=["mcp", "permissions", "least-privilege", "owasp-asi02", "owasp-ast03"],
+)
+
+
 # ── SG-104: Suspicious Tool Name ───────────────────────────────
 
 # A tool name is split into words, at "_", "-", "." and camelCase boundaries, and a
@@ -3783,6 +3931,7 @@ ALL_RULES: list[Rule] = [
     RULE_PACKAGE_REGISTRY,
     RULE_BRAND_NAME_IMPERSONATION,
     RULE_COMPILED_PYTHON,
+    RULE_OVERBROAD_PERMISSIONS,
     RULE_UNRESTRICTED_PATH,
     RULE_SUSPICIOUS_TOOL_NAME,
     RULE_TOOL_NO_DESCRIPTION_OR_SCHEMA,

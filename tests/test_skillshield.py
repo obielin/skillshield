@@ -4426,6 +4426,127 @@ def test_mcp_tool_count_rule_handles_ten_thousand_tools():
     assert time.perf_counter() - start < 2.0
 
 
+@pytest.mark.parametrize(
+    "description, expected",
+    [
+        ("Read, write or delete any file on the system.", True),
+        ("Full filesystem access.", True),
+        ("Full file system access.", True),
+        ("Access all directories.", True),
+        ("Unrestricted disk access.", True),
+        ("Connect to any host.", True),
+        ("Unrestricted network access.", True),
+        ("Make arbitrary HTTP requests.", True),
+        ("MAKE ANY NETWORK REQUEST.", True),
+        ("Reads files in the project's docs/ folder.", False),
+        ("Read the selected document.", False),
+        ("Query the project's documentation endpoint.", False),
+        ("Preview any file format.", False),
+        (None, False),
+        (42, False),
+        # A named folder or an allowlist scopes the access, so the description is not
+        # over-broad.
+        ("List all files in the given directory.", False),
+        ("Read any file the user names inside the project folder.", False),
+        ("Delete all files older than 30 days from the cache folder.", False),
+        ("List all files in the specified directory.", False),
+        ("Read any file within the project folder.", False),
+        ("Read any file in allowed directories.", False),
+        ("Access any endpoint on the domain allowlist.", False),
+        ("Read any file in the project folder or any file in the cache folder.", False),
+        ("Connect to any host on the domain allowlist or any host on the approved list.", False),
+        ("Read any file in the project folder and return a summary.", False),
+        # A scoped phrase does not hide unrestricted access elsewhere in the description,
+        # including a later unrestricted match of the same pattern.
+        ("List all files in the given directory. Read any file on the system.", True),
+        ("Read any file on the system. List all files in the given directory.", True),
+        ("List all files in the given directory; make arbitrary HTTP requests.", True),
+        ("Read any file on the system and list documents within the project folder.", True),
+        ("Read any file on the system; use an allowlist for network requests.", True),
+        ("Read any file within 30 seconds.", True),
+        ("Allowed to read any file.", True),
+        ("Read any file and bypass the allowlist.", True),
+        ("Read any file outside the project folder.", True),
+        ("Read any file not limited to the project folder.", True),
+        ("List all files in the given directory and read any file on the system.", True),
+        # A shared verb can carry an unbounded resource phrase across "and" or "or".
+        ("Read any file in the project folder or any file on the system.", True),
+        ("Read any file in the project folder and any file outside it.", True),
+        ("Connect to any host on the domain allowlist or any host on the internet.", True),
+    ],
+)
+def test_mcp_overbroad_permissions(tmp_path, description, expected):
+    import json
+
+    path = tmp_path / "tools.json"
+    path.write_text(
+        json.dumps(
+            {
+                "tools": [
+                    {
+                        "name": "workspace",
+                        "description": description,
+                        "inputSchema": {"type": "object"},
+                    }
+                ]
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    findings = [f for f in SkillScanner().scan_file(path).findings if f.rule_id == "SG-102"]
+    assert bool(findings) is expected
+    if expected:
+        assert findings[0].severity == Severity.HIGH
+        assert "workspace" in findings[0].snippets[0]
+        assert findings[0].line_numbers == [3]
+
+
+def test_mcp_overbroad_permissions_ignores_prose():
+    result = SkillScanner().scan_text("Read, write or delete any file on the system.")
+    assert "SG-102" not in {f.rule_id for f in result.findings}
+
+
+def test_mcp_overbroad_permissions_reports_each_tool(tmp_path):
+    import json
+
+    path = tmp_path / "tools.jsonl"
+    tools = [
+        {"name": "docs", "description": "Read project documentation."},
+        {"name": "files", "description": "Access any file."},
+        {"name": "network", "description": "Make arbitrary network requests."},
+    ]
+    path.write_text(
+        "\n".join(json.dumps({**tool, "inputSchema": {"type": "object"}}) for tool in tools),
+        encoding="utf-8",
+    )
+    findings = [f for f in SkillScanner().scan_file(path).findings if f.rule_id == "SG-102"]
+    assert len(findings) == 1
+    assert findings[0].line_numbers == [2, 3]
+    assert len(findings[0].snippets) == 2
+    assert "files" in findings[0].snippets[0]
+    assert "network" in findings[0].snippets[1]
+
+
+def test_mcp_overbroad_permissions_rule_handles_ten_thousand_tools():
+    from skillshield.mcp import McpTool, ToolListing
+
+    rule = next(rule for rule in ALL_RULES if rule.id == "SG-102")
+    listing = ToolListing(
+        tools=[
+            McpTool(name=f"workspace_{i}", description="Read any file on the system.")
+            for i in range(10_000)
+        ],
+        format="manifest",
+    )
+    start = time.perf_counter()
+    hits = rule.match_listing(listing)
+    assert len(hits) == 10_000
+    assert time.perf_counter() - start < 2.0
+    assert "owasp-asi02" in rule.tags
+    assert "owasp-ast03" in rule.tags
+
+
 class TestLanguagePrechecks:
     """The French, Spanish, Portuguese and German key-word checks search a lowercase copy."""
 
