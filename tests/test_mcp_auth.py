@@ -96,17 +96,153 @@ def test_localhost_text_does_not_hide_a_remote_http_host(url):
         {"url": "https://example.com/mcp", "auth": {"token": "$SERVICE_TOKEN"}},
         {"url": "https://example.com/mcp", "auth": {"token": "env:SERVICE_TOKEN"}},
         {"url": "https://example.com/mcp", "auth": {"token": "%SERVICE_TOKEN%"}},
+        {"url": "https://example.com/mcp", "auth": {"token": "${env:MCP_TOKEN}"}},
+        {"url": "https://example.com/mcp", "authentication": {"token": "${env:MCP_TOKEN}"}},
         {"url": "https://example.com/mcp", "auth": {"token": {"env": "SERVICE_TOKEN"}}},
         {"url": "https://example.com/mcp", "auth": {"token": {"env": "SERVICE_PRIVATE_KEY"}}},
         {
             "url": "https://example.com/mcp",
             "auth": {"headers": {"Authorization": "Bearer ${SERVICE_TOKEN}"}},
         },
+        {
+            "url": "https://example.com/mcp",
+            "authentication": {"headers": {"Authorization": "Bearer ${env:MCP_TOKEN}"}},
+        },
     ],
 )
 def test_local_and_environment_based_authentication_is_not_flagged(metadata):
     _, result = _scan(**metadata)
     assert _findings(result) == []
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"url": "https://example.com/mcp", "auth": "oauth"},
+        {"url": "https://example.com/mcp", "auth": "oauth2"},
+        {"url": "https://example.com/mcp", "auth": "Bearer"},
+        {"url": "https://example.com/mcp", "authentication": "Basic"},
+        {"url": "https://example.com/mcp", "auth": "Bearer   "},
+        {"url": "https://example.com/mcp", "authentication": "Basic\t "},
+    ],
+)
+def test_bare_authentication_schemes_are_not_hardcoded_credentials(metadata):
+    _, result = _scan(**metadata)
+    assert _findings(result) == []
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"url": "https://example.com/mcp", "auth": "Bearer short-demo-token"},
+        {"url": "https://example.com/mcp", "authentication": "Bearer short-demo-token"},
+        {
+            "url": "https://example.com/mcp",
+            "auth": "Basic c2hvcnQtZGVtby11c2VyOnNob3J0LWRlbW8tcGFzcw==",
+        },
+        {
+            "url": "https://example.com/mcp",
+            "authentication": "Basic c2hvcnQtZGVtby11c2VyOnNob3J0LWRlbW8tcGFzcw==",
+        },
+    ],
+)
+def test_top_level_literal_authentication_is_a_hardcoded_credential(metadata):
+    _, result = _scan(**metadata)
+    findings = _findings(result)
+    assert len(findings) == 1
+    assert len(findings[0].snippets) == 2
+    assert all(
+        snippet.endswith("hardcoded credential in authentication metadata")
+        for snippet in findings[0].snippets
+    )
+    assert any("query" in snippet for snippet in findings[0].snippets)
+    assert any("lookup" in snippet for snippet in findings[0].snippets)
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"url": "https://example.com/mcp", "auth": "Bearer ${env:MCP_TOKEN}"},
+        {"url": "https://example.com/mcp", "authentication": "Basic ${env:MCP_PASSWORD}"},
+        {"url": "https://example.com/mcp", "auth": "Bearer ${MCP_TOKEN}"},
+        {"url": "https://example.com/mcp", "authentication": "Basic $MCP_PASSWORD"},
+        {"url": "https://example.com/mcp", "auth": "Bearer env:MCP_TOKEN"},
+        {"url": "https://example.com/mcp", "auth": "Basic %MCP_PASSWORD%"},
+    ],
+)
+def test_complete_top_level_environment_references_are_not_flagged(metadata):
+    _, result = _scan(**metadata)
+    assert _findings(result) == []
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {
+            "url": "https://example.com/mcp",
+            "auth": {"token": "${env:MCP_TOKEN}-literal-suffix"},
+        },
+        {
+            "url": "https://example.com/mcp",
+            "authentication": {"token": "${MCP_TOKEN}-literal-suffix"},
+        },
+        {
+            "url": "https://example.com/mcp",
+            "auth": {"token": "${env:MCP_TOKEN} fallback-literal"},
+        },
+        {
+            "url": "https://example.com/mcp",
+            "auth": {"token": "${MCP_TOKEN:-literal-fallback}"},
+        },
+        {
+            "url": "https://example.com/mcp",
+            "auth": {"token": "Bearer ${env:MCP_TOKEN}-literal-suffix"},
+        },
+        {
+            "url": "https://example.com/mcp",
+            "auth": "Bearer ${env:MCP_TOKEN}-literal-suffix",
+        },
+        {
+            "url": "https://example.com/mcp",
+            "authentication": "Basic ${env:MCP_PASSWORD} fallback-literal",
+        },
+    ],
+)
+def test_partial_environment_reference_is_still_a_credential(metadata):
+    _, result = _scan(**metadata)
+    findings = _findings(result)
+    assert len(findings) == 1
+    assert all(
+        snippet.endswith("hardcoded credential in authentication metadata")
+        for snippet in findings[0].snippets
+    )
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {
+            "url": "http://203.0.113.5/mcp",
+            "auth": {"token": "${env:MCP_TOKEN}"},
+        },
+        {
+            "url": "http://example.com/mcp",
+            "authentication": "Bearer ${env:MCP_TOKEN}",
+        },
+        {
+            "transport": "http://203.0.113.5/mcp",
+            "auth": {"token": "${MCP_TOKEN}"},
+        },
+    ],
+)
+def test_http_transport_is_reported_with_valid_environment_authentication(metadata):
+    _, result = _scan(**metadata)
+    findings = _findings(result)
+    assert len(findings) == 1
+    assert findings[0].snippets == [
+        "Tool 'query': HTTP transport to a non-loopback host",
+        "Tool 'lookup': HTTP transport to a non-loopback host",
+    ]
 
 
 def test_bare_protocol_listings_do_not_claim_authentication_is_missing():
@@ -142,6 +278,65 @@ def test_new_authentication_snippets_do_not_echo_credentials():
     findings = _findings(result)
     assert findings
     assert all(secret not in snippet for finding in findings for snippet in finding.snippets)
+
+
+@pytest.mark.parametrize(
+    "metadata, credential",
+    [
+        (
+            {
+                "url": "https://example.com/mcp",
+                "auth": {"token": "sk-test-00000000000000000000000000000000"},
+            },
+            "sk-test-00000000000000000000000000000000",
+        ),
+        (
+            {
+                "url": "https://example.com/mcp",
+                "authentication": "Bearer sk-test-00000000000000000000000000000000",
+            },
+            "sk-test-00000000000000000000000000000000",
+        ),
+        (
+            {
+                "url": "https://example.com/mcp",
+                "auth": "Basic c2hvcnQtZGVtby11c2VyOnNob3J0LWRlbW8tcGFzcw==",
+            },
+            "c2hvcnQtZGVtby11c2VyOnNob3J0LWRlbW8tcGFzcw==",
+        ),
+    ],
+)
+def test_authentication_reports_do_not_echo_credentials(tmp_path, metadata, credential):
+    text, result = _scan(**metadata)
+    finding = _findings(result)[0]
+    expected_lines = [n for n, line in enumerate(text.splitlines(), 1) if line == "    {"]
+    assert finding.line_numbers == expected_lines
+    assert any("query" in snippet for snippet in finding.snippets)
+    assert any("lookup" in snippet for snippet in finding.snippets)
+    assert credential not in json.dumps(finding.snippets)
+
+    sarif = results_to_sarif([result])
+    entry = next(r for r in sarif["runs"][0]["results"] if r["ruleId"] == "SG-101")
+    assert credential not in json.dumps(entry)
+    assert [loc["physicalLocation"]["region"]["startLine"] for loc in entry["locations"]] == (
+        expected_lines
+    )
+
+    path = tmp_path / "tools.json"
+    path.write_text(text, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, "-m", "skillshield.cli", "scan", str(path), "--format", "json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 1
+    payload = json.loads(completed.stdout)
+    json_entry = next(f for f in payload["findings"] if f["id"] == "SG-101")
+    assert credential not in json.dumps(json_entry)
+    assert json_entry["line_numbers"] == expected_lines
+    assert any("query" in snippet for snippet in json_entry["snippets"])
+    assert any("lookup" in snippet for snippet in json_entry["snippets"])
 
 
 def test_malformed_url_does_not_hide_a_hardcoded_credential():
