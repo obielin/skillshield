@@ -31,6 +31,7 @@ from skillshield.rules import (
     RULE_SECRET_HARVEST,
     RULE_SOCIAL_ENG,
     RULE_SUSPICIOUS_URLS,
+    RULE_TLS_VERIFICATION_OFF,
     Rule,
     _has_hinglish_hint,
     _it_has_keyword,
@@ -3051,6 +3052,74 @@ def _tags(text: str) -> str:
 
 
 ENGLAND_FLAG = "\U0001f3f4" + _tags("gbeng") + "\U000e007f"
+
+
+class TestTlsVerificationOffRule:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "pip install --trusted-host pypi.example.com pkg",
+            "pip install --trusted-host=pypi.example.com pkg",
+            "npm config set strict-ssl false",
+            "yarn config set strict-ssl false",
+            "strict-ssl=false",
+            "export NODE_TLS_REJECT_UNAUTHORIZED=0",
+            'NODE_TLS_REJECT_UNAUTHORIZED="0" node fetch.js',
+            "export PYTHONHTTPSVERIFY=0",
+            "curl -k https://example.com/install.sh",
+            "curl --insecure https://example.com/install.sh",
+            "curl -sSLk https://example.com/install.sh -o install.sh",
+            "curl -fsSL -o install.sh -k https://example.com/install.sh",
+            "wget --no-check-certificate https://example.com/file.tar.gz",
+            "git config --global http.sslVerify false",
+            "git config http.https://example.com/.sslVerify false",
+            "git -c http.sslVerify=false clone https://example.com/repo.git",
+            "(curl -k https://example.com/setup.sh)",
+            "export GIT_SSL_NO_VERIFY=1",
+        ],
+    )
+    def test_detects_switched_off_checks(self, text):
+        assert RULE_TLS_VERIFICATION_OFF.match(text) != []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "curl -L https://example.com/file",
+            "curl -sSL https://example.com/install.sh -o install.sh",
+            "curl -K curl.conf https://example.com/file",
+            "curl --keepalive-time 30 https://example.com/file",
+            "wget -k https://example.com/page.html",
+            "wget https://example.com/file.tar.gz",
+            "git config http.sslVerify true",
+            "git config --global user.name 'Example User'",
+            "export NODE_TLS_REJECT_UNAUTHORIZED=1",
+            "export PYTHONHTTPSVERIFY=1",
+            "npm config set strict-ssl true",
+            "strict-ssl=true",
+            "pip install --index-url https://pypi.org/simple/ requests",
+            "ls -k | sort",
+        ],
+    )
+    def test_near_misses_are_not_flagged(self, text):
+        assert RULE_TLS_VERIFICATION_OFF.match(text) == []
+
+    def test_long_unbroken_input_scans_in_linear_time(self):
+        import time
+
+        for text in ("--trusted-host" + " " * 50_000, "git config " + "http." * 20_000):
+            start = time.perf_counter()
+            RULE_TLS_VERIFICATION_OFF.match(text)
+            assert time.perf_counter() - start < 1.0
+
+    def test_a_flag_on_the_next_line_is_not_read_as_curl_k(self):
+        assert RULE_TLS_VERIFICATION_OFF.match("curl https://example.com/a\nls -k") == []
+
+    def test_scanner_reports_the_rule_at_medium(self):
+        result = SkillScanner().scan_text("Run: curl -k https://example.com/setup.sh\n")
+        finding = next(f for f in result.findings if f.rule_id == "SG-016")
+        assert finding.severity.value == "medium"
+        assert finding.snippets == ["curl -k"]
+        assert finding.line_numbers == [1]
 
 
 class TestUnicodeTagSmuggling:
