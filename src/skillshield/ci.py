@@ -39,6 +39,7 @@ from skillshield.scanner import (
     _dir_is_skipped,
     _is_agent_rule_file,
     _is_tool_listing_file,
+    _risk_level,
 )
 
 LEVELS = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
@@ -170,12 +171,25 @@ def decide(results: list[SkillScanResult], missing: list[str], fail_on: str | No
     return 1 if any(_rank(r.risk_level) >= threshold for r in results) else 0
 
 
-def highest_level(results: list[SkillScanResult]) -> str:
-    """The most severe risk level among the results that were read."""
-    read = [r for r in results if r.risk_level != "ERROR"]
-    if not read:
+def _effective_risk_level(result: SkillScanResult) -> str:
+    """The risk level of a result, deriving one from findings when risk_level is ERROR."""
+    if result.risk_level != "ERROR":
+        return result.risk_level
+    if not result.findings:
         return "SAFE"
-    return max((r.risk_level for r in read), key=_rank)
+    return _risk_level(result.risk_score, result.findings)
+
+
+def _is_flagged(result: SkillScanResult) -> bool:
+    """Whether a result carries reportable findings, even if the file had a read error."""
+    return _effective_risk_level(result) != "SAFE"
+
+
+def highest_level(results: list[SkillScanResult]) -> str:
+    """The most severe risk level among the results, including findings on unreadable files."""
+    if not results:
+        return "SAFE"
+    return max((_effective_risk_level(r) for r in results), key=_rank)
 
 
 def _in_tooling_dir(name: str, workspace: Path) -> bool:
@@ -216,7 +230,7 @@ def summary_markdown(
     """A Markdown summary of the scan, for the GitHub job summary."""
     verdict = {0: "Passed", 1: "Failed", 2: "Error"}[exit_code]
     threshold = fail_on or "never"
-    flagged = [r for r in results if r.risk_level not in ("SAFE", "ERROR")]
+    flagged = [r for r in results if _is_flagged(r)]
     errors = [r for r in results if r.risk_level == "ERROR"]
     unscanned = unscanned or []
     lines = [
@@ -236,10 +250,12 @@ def summary_markdown(
     ]
     if flagged:
         lines += ["| File | Risk | Score | Findings |", "|---|---|---|---|"]
-        ordered = sorted(flagged, key=lambda r: (-_rank(r.risk_level), r.skill_name))
+        ordered = sorted(flagged, key=lambda r: (-_rank(_effective_risk_level(r)), r.skill_name))
         for r in ordered[:MAX_FLAGGED_LISTED]:
             ids = ", ".join(f.rule_id for f in r.findings)
-            lines.append(f"| `{r.skill_name}` | {r.risk_level} | {r.risk_score:.0f} | {ids} |")
+            lines.append(
+                f"| `{r.skill_name}` | {_effective_risk_level(r)} | {r.risk_score:.0f} | {ids} |"
+            )
         omitted_flagged = len(ordered) - MAX_FLAGGED_LISTED
         if omitted_flagged > 0:
             lines.append(f"| ... and {omitted_flagged} more, not listed here | | | |")
@@ -292,41 +308,37 @@ def console_report(
     lines = []
     annotated = 0
     unread = 0
-    # Annotate the worst files first, in the order the summary lists them, so a
-    # bounded log never spends its slots on the mildest findings.
-    ordered = sorted(
-        results, key=lambda r: (r.risk_level != "ERROR", -_rank(r.risk_level), r.skill_name)
+    # Annotate unreadable files first, then the worst flagged files, in the
+    # order the summary lists them, so a bounded log never spends its slots on
+    # the mildest findings.
+    errors = sorted((r for r in results if r.risk_level == "ERROR"), key=lambda r: r.skill_name)
+    for r in errors[:MAX_ERRORS_LISTED]:
+        unread += 1
+        lines.append(
+            f"::error file={r.skill_name}::SkillShield could not read this file: {r.error}"
+        )
+    flagged = sorted(
+        (r for r in results if _is_flagged(r)),
+        key=lambda r: (-_rank(_effective_risk_level(r)), r.skill_name),
     )
-    for r in ordered:
-        if r.risk_level == "ERROR":
-            if unread >= MAX_ERRORS_LISTED:
-                continue
-            unread += 1
-            lines.append(
-                f"::error file={r.skill_name}::SkillShield could not read this file: {r.error}"
-            )
-        elif r.risk_level != "SAFE":
-            if annotated >= MAX_FLAGGED_LISTED:
-                continue
-            annotated += 1
-            ids = ", ".join(f"{f.rule_id} {f.name}" for f in r.findings)
-            note = missing_source_note(r)
-            if note:
-                ids = f"{ids}; {note}"
-            level = r.risk_level
-            kind = "error" if exit_code == 1 and level in ("HIGH", "CRITICAL") else "warning"
-            line = r.findings[0].line_numbers[0] if r.findings and r.findings[0].line_numbers else 1
-            lines.append(
-                f"::{kind} file={r.skill_name},line={line},title=SkillShield {level}::{ids}"
-            )
-    flagged_total = sum(1 for r in results if r.risk_level not in ("SAFE", "ERROR"))
+    for r in flagged[:MAX_FLAGGED_LISTED]:
+        annotated += 1
+        ids = ", ".join(f"{f.rule_id} {f.name}" for f in r.findings)
+        note = missing_source_note(r)
+        if note:
+            ids = f"{ids}; {note}"
+        level = _effective_risk_level(r)
+        kind = "error" if exit_code == 1 and level in ("HIGH", "CRITICAL") else "warning"
+        line = r.findings[0].line_numbers[0] if r.findings and r.findings[0].line_numbers else 1
+        lines.append(f"::{kind} file={r.skill_name},line={line},title=SkillShield {level}::{ids}")
+    flagged_total = len(flagged)
     if flagged_total > annotated:
         lines.append(
             f"::warning::SkillShield flagged {flagged_total} file(s); the {annotated} worst "
             f"are annotated here and in the job summary, the other "
             f"{flagged_total - annotated} are counted only."
         )
-    unread_total = sum(1 for r in results if r.risk_level == "ERROR")
+    unread_total = len(errors)
     if unread_total > unread:
         lines.append(
             f"::warning::SkillShield could not read {unread_total} file(s); the first "
@@ -429,7 +441,7 @@ def run(env: dict[str, str]) -> int:
         "a",
     )
 
-    flagged = sum(1 for r in results if r.risk_level not in ("SAFE", "ERROR"))
+    flagged = sum(1 for r in results if _is_flagged(r))
     outputs = {
         "risk-level": highest_level(results),
         "scanned": str(len(results)),
