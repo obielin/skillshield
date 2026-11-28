@@ -2251,7 +2251,12 @@ _SUDO_OPTIONS_WITH_ARGUMENT = {"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "
 
 
 def _looks_like_file(token: str) -> bool:
-    """Whether an argument has the shape of a path (`report.sh`, `./run`, `bin/run`)."""
+    """Whether an argument has the shape of a path (`report.sh`, `./run`, `bin/run`).
+
+    Trailing sentence punctuation is left out first, so a word like `install.` is prose
+    rather than a file with an extension.
+    """
+    token = token.rstrip(".,:;!?")
     return "." in token or "/" in token
 
 
@@ -2540,9 +2545,12 @@ def _split_commands(line: str) -> list[list[tuple[str, str]]]:
 def _redirects_stdout_away(stage: str) -> bool:
     """Whether this command sends its standard output to a file instead of the pipe.
 
-    Reads `>`, `>>`, `>|`, `&>`, `1>` and `>&N` as leaving the pipe, but leaves `2>` (stderr
-    only) and `>&1` (stdout duplicated back to stdout) alone.
+    Follows the stage's redirections from left to right: `>`, `>>`, `>|`, `&>` and `N>`
+    point a file descriptor at a file, while `N>&M` copies where M currently points.
+    Standard output (fd 1) starts at the pipe, so a later redirection can point it back
+    at the pipe, as in `3>&1 1>/dev/null 1>&3`.
     """
+    targets = {"1": "pipe"}
     i, n = 0, len(stage)
     quote = ""
     while i < n:
@@ -2565,28 +2573,37 @@ def _redirects_stdout_away(stage: str) -> bool:
         if ch != ">":
             i += 1
             continue
+        start = i
+        while start > 0 and stage[start - 1].isdigit():
+            start -= 1
+        if start < i and (start == 0 or stage[start - 1].isspace()):
+            fd = stage[start:i]
+        else:
+            fd = "1"
+        both = start == i and i > 0 and stage[i - 1] == "&"
         j = i + 1
         if j < n and stage[j] in ">|":
             j += 1
-        k = i - 1
-        fd = ""
-        while k >= 0 and stage[k].isdigit():
-            fd = stage[k] + fd
-            k -= 1
-        if fd and fd != "1":
-            i = j  # `2>` only redirects stderr; stdout still reaches the pipe
-            continue
         while j < n and stage[j].isspace():
             j += 1
         if j < n and stage[j] == "&":
             d = j + 1
             while d < n and stage[d].isdigit():
                 d += 1
-            if stage[j + 1 : d] == "1":
-                i = d  # `>&1` writes to stdout, so the pipe still gets the download
-                continue
-        return True
-    return False
+            if d > j + 1:
+                target = targets.get(stage[j + 1 : d], "other")
+            else:
+                target = "file"  # `>&file`, or a closed descriptor for `>&-`
+            targets[fd] = target
+            if both:
+                targets["2"] = target
+            i = d
+            continue
+        targets[fd] = "file"
+        if both:
+            targets["2"] = "file"
+        i = j
+    return targets.get("1", "other") != "pipe"
 
 
 def _is_download(stage: str, outside_quotes: str) -> bool:
@@ -2646,20 +2663,16 @@ def _pipe_to_interpreter_matches(text: str) -> list[str]:
         if "|" not in line or not _FETCHER.search(line):
             continue
         for stages in _split_commands(line):
-            first = next(
-                (n for n, (stage, seen) in enumerate(stages) if _is_download(stage, seen)), None
-            )
-            if first is None:
-                continue
-            # The snippet starts at the download command, not at the words before it.
-            download = stages[first][0]
-            fetcher = _FETCHER.search(download)
-            download = download[fetcher.start() :] if fetcher else download
-            for end in range(first + 1, len(stages)):
-                if _reads_script_from_stdin(stages[end][0]):
+            active = None
+            for end, (stage, seen) in enumerate(stages):
+                if active is not None and _reads_script_from_stdin(stage):
+                    # The snippet starts at the download command, not at the words before it.
+                    download = stages[active][0]
+                    fetcher = _FETCHER.search(download)
+                    download = download[fetcher.start() :] if fetcher else download
                     # The snippet is cut from the line as written, spacing around each | included,
                     # so the scanner can find it in the text and report its line.
-                    rest = [_read_stage(s)[1] for s, _ in stages[first + 1 : end + 1]]
+                    rest = [_read_stage(s)[1] for s, _ in stages[active + 1 : end + 1]]
                     start = line.find(download.strip())
                     stop = line.find(rest[-1], start) + len(rest[-1]) if start >= 0 else -1
                     if start >= 0 and stop > start:
@@ -2667,8 +2680,10 @@ def _pipe_to_interpreter_matches(text: str) -> list[str]:
                     else:
                         matches.append(" | ".join(p.strip() for p in [download, *rest])[:200])
                     break
-                if _stage_replaces_download(stages[end][0]):
-                    break  # this stage replaces what the download sent on
+                if active is not None and _stage_replaces_download(stage):
+                    active = None  # this stage replaces what the download sent on
+                elif active is None and _is_download(stage, seen):
+                    active = end
     return matches
 
 
@@ -2677,6 +2692,32 @@ def _pipe_to_interpreter_matches(text: str) -> list[str]:
 _HERE_STRING_FETCH = re.compile(r"<<<\s*[\"']?(?:\$\(|`)\s*(?:curl|wget)(?![\w-])", re.IGNORECASE)
 _SEPARATE_PROCESS_FETCH = re.compile(r"<\s*<\(\s*(?:curl|wget)(?![\w-])", re.IGNORECASE)
 _DIRECT_PROCESS_FETCH = re.compile(r"<\(\s*(?:curl|wget)(?![\w-])", re.IGNORECASE)
+_REDIRECTION_TOKEN = re.compile(r"^\d*(?:&>>|&>|<<<|<<-?|<>|<&|>>|>\||>&|>|<(?!\())")
+
+
+def _strip_redirections(arguments: list[str]) -> list[str]:
+    """Remove redirection operators and their targets from a command's arguments."""
+    kept: list[str] = []
+    skip_target = False
+    for token in arguments:
+        if skip_target:
+            skip_target = False
+            continue
+        match = _REDIRECTION_TOKEN.match(token)
+        if match:
+            skip_target = match.end() == len(token)
+            continue
+        kept.append(token)
+    return kept
+
+
+def _source_reads_stdin(arguments: list[str]) -> bool:
+    """Whether `.`/`source` names the download rather than a script file."""
+    for token in _strip_redirections(arguments):
+        if token == "--" or token.startswith("-"):
+            continue
+        return token.startswith("<(")
+    return True
 
 
 def _redirection_to_interpreter_matches(text: str) -> list[str]:
@@ -2697,8 +2738,12 @@ def _redirection_to_interpreter_matches(text: str) -> list[str]:
                     found = _HERE_STRING_FETCH.search(outside_quotes) or (
                         _SEPARATE_PROCESS_FETCH.search(outside_quotes)
                     )
+                    if found and not _shell_reads_stdin(_strip_redirections(tokens[i + 1 :])):
+                        found = None
                 elif name in ("source", "."):
                     found = _DIRECT_PROCESS_FETCH.search(outside_quotes)
+                    if found and not _source_reads_stdin(tokens[i + 1 :]):
+                        found = None
                 else:
                     found = None
                 if found:
