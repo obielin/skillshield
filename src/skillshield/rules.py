@@ -3553,6 +3553,92 @@ RULE_COMPILED_PYTHON = Rule(
 )
 
 
+# ── SG-017: Git Setting That Runs a Program ───────────────────
+
+# These git settings name a program that git itself runs: hooks on commit and
+# checkout, the ssh command behind every fetch and push, the pager and editor,
+# the filesystem monitor, and the credential helper (which also receives the
+# user's credentials). Set once, usually with --global, they apply to every
+# later git command. Git keys are case-insensitive.
+_GIT_PROGRAM_KEY = (
+    r"(?:core\.(?:hooksPath|sshCommand|pager|editor|fsmonitor)|credential\.(?:[^\s'\"=]*\.)?helper)"
+)
+
+# "git config [--global|--system|--local|--add|...] KEY VALUE". Reading (--get)
+# or removing (--unset) a key is not matched, and neither is a key with no value.
+# Every whitespace run is [ \t] so the match cannot run across lines.
+_GIT_CONFIG_PROGRAM_COMMAND = re.compile(
+    r"(?<![\w.-])git"
+    r"(?:[ \t]+(?:-[Cc][ \t]+\S+|--[\w-]+=\S*))*"
+    r"[ \t]+config"
+    r"(?:[ \t]+(?:set|--file[ \t]+\S+|--file=\S*|--type=\S*|--type[ \t]+\S+|-f[ \t]+\S+"
+    r"|--(?!get|unset|list|remove|rename|edit|file|type)[\w-]*(?:=\S*)?))*"
+    rf"[ \t]+['\"]?{_GIT_PROGRAM_KEY}['\"]?"
+    r"[ \t]+['\"]?[^\s&|;'\"]",
+    re.IGNORECASE,
+)
+
+# A [section] header in a .gitconfig file, and the lines in it that name a program.
+_GITCONFIG_SECTION = re.compile(
+    r"^[ \t]*\[[ \t]*([A-Za-z][A-Za-z0-9.-]*)(?:[ \t]+\"[^\"\r\n]*\")?[ \t]*\]"
+)
+_GITCONFIG_PROGRAM_LINE = {
+    "core": re.compile(
+        r"^[ \t]*(?:hooksPath|sshCommand|pager|editor|fsmonitor)[ \t]*=[ \t]*['\"]?[^\s'\"]",
+        re.IGNORECASE,
+    ),
+    "credential": re.compile(r"^[ \t]*helper[ \t]*=[ \t]*['\"]?[^\s'\"]", re.IGNORECASE),
+}
+
+
+def _check_git_program_setting(text: str) -> list[str]:
+    hits = [match.group(0).strip() for match in _GIT_CONFIG_PROGRAM_COMMAND.finditer(text)]
+
+    # The same keys written into a .gitconfig file: only a matching line inside
+    # its own [core] or [credential] section counts, so a sentence that explains
+    # what core.hooksPath does is not a hit.
+    line_pattern: re.Pattern | None = None
+    for raw_line in text.splitlines():
+        header = _GITCONFIG_SECTION.match(raw_line)
+        if header:
+            line_pattern = _GITCONFIG_PROGRAM_LINE.get(header.group(1).lower())
+            continue
+        if line_pattern is not None and line_pattern.match(raw_line):
+            hits.append(raw_line.strip())
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for hit in hits:
+        if hit in seen:
+            continue
+        seen.add(hit)
+        unique.append(hit)
+    return unique
+
+
+RULE_GIT_PROGRAM_SETTING = Rule(
+    id="SG-017",
+    name="Git Setting That Runs a Program",
+    severity=Severity.HIGH,
+    description=(
+        "The skill sets a git option that names a program for git to run: "
+        "core.hooksPath, core.sshCommand, core.pager, core.editor, core.fsmonitor "
+        "or credential.helper, with git config (--global, --system or local) or in "
+        "a .gitconfig file. Set globally, it turns every later git command into a "
+        "way to run code, and credential.helper also receives the user's "
+        "credentials. See the git-config documentation: "
+        "https://git-scm.com/docs/git-config."
+    ),
+    remediation=(
+        "Remove the setting. A skill should not change how git runs programs; if a "
+        "hook or credential helper is really needed, tell the user to review and set "
+        "it themselves."
+    ),
+    check_fn=_check_git_program_setting,
+    tags=["git-config", "code-execution", "persistence", "owasp-asi05", "owasp-ast01"],
+)
+
+
 # ── SG-104: Suspicious Tool Name ───────────────────────────────
 
 # A tool name is split into words, at "_", "-", "." and camelCase boundaries, and a
@@ -3783,6 +3869,7 @@ ALL_RULES: list[Rule] = [
     RULE_PACKAGE_REGISTRY,
     RULE_BRAND_NAME_IMPERSONATION,
     RULE_COMPILED_PYTHON,
+    RULE_GIT_PROGRAM_SETTING,
     RULE_UNRESTRICTED_PATH,
     RULE_SUSPICIOUS_TOOL_NAME,
     RULE_TOOL_NO_DESCRIPTION_OR_SCHEMA,

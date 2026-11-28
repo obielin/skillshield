@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- SG-017, Git Setting That Runs a Program (HIGH): flags `git config` (with `--global`, `--system` or none) that sets `core.hooksPath`, `core.sshCommand`, `core.pager`, `core.editor`, `core.fsmonitor` or `credential.helper`, and the same keys written into a `.gitconfig` file (#104).
+
 ### Changed
 
 - The README explains choosing a version of the GitHub Action: `@v1` gets each new 1.x release, a pinned release such as `@v1.4.0` stays fixed, and `fail-on: none` tries a release without failing the build.
