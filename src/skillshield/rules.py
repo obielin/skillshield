@@ -3553,6 +3553,51 @@ RULE_COMPILED_PYTHON = Rule(
 )
 
 
+# ── SG-016: Certificate Checks Turned Off ──────────────────────
+
+# A command or setting that switches off TLS certificate checking for a download
+# or install. The source may be the right one, but the connection to it no longer
+# proves who answers (CWE-295, Improper Certificate Validation). Every whitespace
+# run is [ \t] and no pattern crosses a newline, so a scan stays linear.
+_TLS_OFF_PATTERNS = [
+    # pip install --trusted-host host
+    r"--trusted-host(?:=|[ \t]+)\S+",
+    # npm, yarn or pnpm: config set strict-ssl false, or "strict-ssl=false" in .npmrc
+    r"\b(?:npm|yarn|pnpm)[ \t]+config[ \t]+set[ \t]+strict-ssl[ \t]+false\b",
+    r"^[ \t]*strict-ssl[ \t]*=[ \t]*false\b",
+    # NODE_TLS_REJECT_UNAUTHORIZED=0 and PYTHONHTTPSVERIFY=0 (quoted or not)
+    r"\bNODE_TLS_REJECT_UNAUTHORIZED[ \t]*=[ \t]*['\"]?0\b",
+    r"\bPYTHONHTTPSVERIFY[ \t]*=[ \t]*['\"]?0\b",
+    # curl --insecure, and -k alone or inside a group of short flags such as -sSLk
+    r"\bcurl\b[^\n|;&]*?[ \t](?:--insecure\b|-[a-zA-Z]*(?-i:k)[a-zA-Z]*(?=[ \t;&|)]|$))",
+    # wget --no-check-certificate
+    r"\bwget\b[^\n|;&]*?[ \t]--no-check-certificate\b",
+    # git config [--global] [http.<url>.]sslVerify false, and GIT_SSL_NO_VERIFY
+    r"\bgit\b[^\n|;&]*?[ \t]http(?:\.\S*)?\.sslVerify(?:=|[ \t]+)(?:false|0|off|no)\b",
+    r"\bGIT_SSL_NO_VERIFY[ \t]*=[ \t]*['\"]?(?:1|true)\b",
+]
+
+RULE_TLS_VERIFICATION_OFF = Rule(
+    id="SG-016",
+    name="Certificate Checks Turned Off",
+    severity=Severity.MEDIUM,
+    description=(
+        "The skill switches off TLS certificate checking for a download or install "
+        "(curl -k, wget --no-check-certificate, pip --trusted-host, npm strict-ssl "
+        "false, NODE_TLS_REJECT_UNAUTHORIZED=0, git http.sslVerify false). The "
+        "registry or host may be the right one, but anyone on the network can then "
+        "swap the download for something else (CWE-295, OWASP AST02)."
+    ),
+    remediation=(
+        "Keep certificate checking on. Remove -k/--insecure, --no-check-certificate, "
+        "--trusted-host and the settings that disable verification; if a host uses a "
+        "private certificate authority, trust that CA instead of turning checks off."
+    ),
+    pattern=re.compile("|".join(_TLS_OFF_PATTERNS), re.IGNORECASE | re.MULTILINE),
+    tags=["tls", "certificate-validation", "supply-chain", "owasp-asi04", "owasp-ast02"],
+)
+
+
 # ── SG-104: Suspicious Tool Name ───────────────────────────────
 
 # A tool name is split into words, at "_", "-", "." and camelCase boundaries, and a
@@ -3783,6 +3828,7 @@ ALL_RULES: list[Rule] = [
     RULE_PACKAGE_REGISTRY,
     RULE_BRAND_NAME_IMPERSONATION,
     RULE_COMPILED_PYTHON,
+    RULE_TLS_VERIFICATION_OFF,
     RULE_UNRESTRICTED_PATH,
     RULE_SUSPICIOUS_TOOL_NAME,
     RULE_TOOL_NO_DESCRIPTION_OR_SCHEMA,

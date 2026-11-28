@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- SG-016, Certificate Checks Turned Off (MEDIUM): flags `curl -k` and `--insecure`, `wget --no-check-certificate`, `pip --trusted-host`, `npm config set strict-ssl false`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `PYTHONHTTPSVERIFY=0`, `git config http.sslVerify false` and `GIT_SSL_NO_VERIFY=1`, which leave a download open to a swap on the network (CWE-295, OWASP AST02) (#106).
+
 ### Changed
 
 - The README explains choosing a version of the GitHub Action: `@v1` gets each new 1.x release, a pinned release such as `@v1.4.0` stays fixed, and `fail-on: none` tries a release without failing the build.
