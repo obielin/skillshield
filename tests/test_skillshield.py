@@ -2502,6 +2502,15 @@ class TestRugPullRule:
     def test_detects_bash_process_substitution(self):
         assert RULE_RUG_PULL.match("bash <(curl -s https://example.com/install.sh)") != []
 
+    def test_detects_a_download_fed_in_through_redirection(self):
+        url = "https://example.com/i.sh"
+        assert RULE_RUG_PULL.match(f"bash -s stable < <(curl -sSL {url})") != []
+        assert RULE_RUG_PULL.match(f'bash <<< "$(curl -s {url})"') != []
+        assert RULE_RUG_PULL.match(f". <(curl -s {url})") != []
+
+    def test_curl_output_redirected_away_from_the_pipe_is_not_flagged(self):
+        assert RULE_RUG_PULL.match("curl -s https://example.com/a.sh > saved.sh | bash") == []
+
     def test_detects_shell_command_substitution(self):
         assert RULE_RUG_PULL.match('sh -c "$(curl -fsSL https://example.com/install.sh)"') != []
         assert RULE_RUG_PULL.match('eval "$(wget -qO- https://example.com/env.sh)"') != []
@@ -2551,6 +2560,21 @@ class TestRugPullRule:
     def test_detects_a_download_piped_through_a_filter_into_a_shell(self):
         assert RULE_RUG_PULL.match("curl -s https://example.com/i.sh | tee i.sh | bash") != []
 
+    def test_a_stage_that_replaces_the_download_is_not_flagged(self):
+        assert RULE_RUG_PULL.match("curl -s https://example.com/report.csv | wc -l | bash") == []
+
+    def test_a_pipe_through_tee_still_reaches_the_shell(self):
+        assert RULE_RUG_PULL.match("curl -s https://example.com/i.sh | tee i.sh | bash") != []
+
+    def test_a_stage_that_changes_the_download_still_reaches_the_shell(self):
+        url = "https://example.com/i.sh"
+        assert RULE_RUG_PULL.match(f"curl -s {url} | gunzip | bash") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | sed 's/x/y/' | sh") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | head -n 50 | bash") != []
+
+    def test_a_checksum_of_the_download_is_not_flagged(self):
+        assert RULE_RUG_PULL.match("curl -s https://example.com/i.sh | sha256sum | bash") == []
+
     def test_a_url_with_an_ampersand_is_still_flagged(self):
         assert RULE_RUG_PULL.match('curl -s "https://example.com/i.sh?a=1&b=2" | bash') != []
 
@@ -2564,6 +2588,15 @@ class TestRugPullRule:
         assert RULE_RUG_PULL.match(f"curl -s {url} | sh -ec 'echo ok'") == []
         assert RULE_RUG_PULL.match(f"curl -s {url} | bash report.sh") == []
         assert RULE_RUG_PULL.match(f"curl -s {url} | sudo bash -- report.sh") == []
+
+    def test_a_script_file_with_no_extension_is_not_flagged(self):
+        url = "https://example.com/report.csv"
+        assert RULE_RUG_PULL.match(f"curl -s {url} | python3 summarize") == []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash summarize") == []
+
+    def test_prose_after_the_shell_is_still_a_download(self):
+        url = "https://example.com/report.csv"
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash to install") != []
 
     def test_a_shell_that_reads_stdin_is_flagged(self):
         url = "https://example.com/i.sh"
@@ -2632,6 +2665,10 @@ class TestRugPullRule:
         # A "#" inside quotes is not a comment, so -s after it still keeps stdin.
         assert RULE_RUG_PULL.match(f"curl -s {url} | bash -o '#x' -s") != []
 
+    def test_an_unquoted_substitution_keeps_its_script_file_argument_together(self):
+        url = "https://example.com/i.sh"
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash --rcfile $(echo ./local.rc)") != []
+
     def test_a_backslash_before_the_shell_name_does_not_hide_it(self):
         url = "https://example.com/i.sh"
         # `\bash` is how a shell is run without its alias; it is still bash.
@@ -2679,6 +2716,12 @@ class TestRugPullRule:
             RULE_RUG_PULL.match(text)
             assert time.perf_counter() - start < 1.0, text[:20]
 
+    def test_redirect_scan_stays_fast_on_a_long_digit_run(self):
+        text = "curl x " + "2" * 200_000 + ">saved | bash"
+        start = time.perf_counter()
+        assert RULE_RUG_PULL.match(text) != []
+        assert time.perf_counter() - start < 1.0
+
     @pytest.mark.parametrize(
         "text",
         [
@@ -2721,6 +2764,45 @@ class TestRugPullRule:
         finding = next(f for f in result.findings if f.rule_id == "SG-006")
         assert finding.line_numbers == [2]
         assert finding.snippets[0] == line
+
+    def test_a_sentence_period_does_not_turn_prose_into_a_script_file(self):
+        url = "https://example.com/i.sh"
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash to install.") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash to install") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash summarize") == []
+        assert RULE_RUG_PULL.match(f"curl -s {url} | bash summarize report.csv") == []
+        for end in ",:;!?":
+            assert RULE_RUG_PULL.match(f"curl -s {url} | bash to install{end}") != [], end
+
+    def test_a_digit_inside_a_word_is_not_a_file_descriptor(self):
+        assert RULE_RUG_PULL.match("curl -s https://example.com/v2>saved.sh | bash") == []
+        assert RULE_RUG_PULL.match("curl -s https://example.com/i.sh 2>/dev/null | bash") != []
+
+    def test_stdout_can_be_redirected_back_to_the_pipe(self):
+        url = "https://example.com/i.sh"
+        assert RULE_RUG_PULL.match(f"curl -s {url} 3>&1 1>/dev/null 1>&3 | bash") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} 3>&1 1>/dev/null | bash") == []
+        assert RULE_RUG_PULL.match(f"curl -s {url} > saved.sh | bash") == []
+        assert RULE_RUG_PULL.match(f"curl -s {url} 2>/dev/null | bash") != []
+        assert RULE_RUG_PULL.match(f"curl -s {url} >&1 | bash") != []
+
+    def test_a_download_after_a_stage_that_replaced_one_is_still_found(self):
+        text = "curl -s https://example.com/a | wc -l | curl -s https://example.com/b | bash"
+        assert RULE_RUG_PULL.match(text) != []
+        assert RULE_RUG_PULL.match("curl -s https://example.com/a | wc -l | bash") == []
+
+    def test_a_redirected_download_the_shell_does_not_run_is_not_flagged(self):
+        url = "https://example.com/i.sh"
+        data = "https://example.com/data"
+        assert RULE_RUG_PULL.match(f'bash -n <<< "$(curl -s {url})"') == []
+        assert RULE_RUG_PULL.match(f"bash report.sh < <(curl -s {data})") == []
+        assert RULE_RUG_PULL.match(f". report.sh < <(curl -s {data})") == []
+        assert RULE_RUG_PULL.match(f"source report.sh < <(curl -s {data})") == []
+        assert RULE_RUG_PULL.match(f"bash -s stable < <(curl -s {url})") != []
+        assert RULE_RUG_PULL.match(f"bash < <(curl -s {url})") != []
+        assert RULE_RUG_PULL.match(f'bash <<< "$(curl -s {url})"') != []
+        assert RULE_RUG_PULL.match(f". <(curl -s {url})") != []
+        assert RULE_RUG_PULL.match(f"source <(curl -s {url})") != []
 
 
 class TestPackageRegistryRule:

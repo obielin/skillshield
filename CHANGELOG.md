@@ -8,6 +8,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - The README explains choosing a version of the GitHub Action: `@v1` gets each new 1.x release, a pinned release such as `@v1.4.0` stays fixed, and `fail-on: none` tries a release without failing the build.
 
+### Fixed
+
+- SG-006 reads more pipeline shapes the way the shell does. No longer flagged: a stage that replaces the download with output of its own (`| wc -l | bash`, a checksum, `echo`), a script file named without an extension (`| bash summarize`), and `curl ... > saved.sh | bash`, where the download goes to the file. Now flagged: `bash --rcfile $(echo ./local.rc)` after a download, and a download fed in with `< <(curl ...)`, `<<< "$(curl ...)"` or `. <(curl ...)`. Any other middle stage (`gunzip`, `sed`, `head`) still passes the download on, so those keep the finding (#193).
+
 ## [1.4.0]
 
 ### Upgrade notes
