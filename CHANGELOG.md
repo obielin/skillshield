@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- SG-018, Library Preloaded Into Other Programs (MEDIUM): flags `LD_PRELOAD` or `DYLD_INSERT_LIBRARIES` set to a value, `LD_LIBRARY_PATH` pointing at a temporary or download folder, and writes to `/etc/ld.so.preload` (#103).
+
 ### Changed
 
 - The README explains choosing a version of the GitHub Action: `@v1` gets each new 1.x release, a pinned release such as `@v1.4.0` stays fixed, and `fail-on: none` tries a release without failing the build.

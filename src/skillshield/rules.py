@@ -3553,6 +3553,77 @@ RULE_COMPILED_PYTHON = Rule(
 )
 
 
+# ── SG-018: Library Preloaded Into Other Programs ─────────────
+
+# LD_PRELOAD (Linux) and DYLD_INSERT_LIBRARIES (macOS) load a library into every
+# program started afterwards, and /etc/ld.so.preload does the same for the whole
+# machine. Some legitimate skills do this, so the finding asks for a review.
+_PRELOAD_VARIABLE = r"(?:LD_PRELOAD|DYLD_INSERT_LIBRARIES)"
+
+# "LD_PRELOAD=/tmp/x.so", "export DYLD_INSERT_LIBRARIES=x", "env LD_PRELOAD=x cmd",
+# Dockerfile "ENV LD_PRELOAD /x" and csh "setenv LD_PRELOAD /x". No space is allowed
+# after "=": in a shell "LD_PRELOAD= cmd" sets an empty value, which clears it.
+_PRELOAD_ASSIGNMENT = re.compile(
+    rf"(?<![\w$]){_PRELOAD_VARIABLE}=['\"]?[^\s'\";&|]+"
+    rf"|\b(?:ENV|setenv)[ \t]+{_PRELOAD_VARIABLE}[ \t]+['\"]?[^\s'\";&|]+",
+)
+
+# LD_LIBRARY_PATH with a temporary or download folder among its entries: a library
+# dropped there is then found before the system one.
+_RISKY_LIBRARY_FOLDER = re.compile(
+    r"(?:/tmp|/var/tmp|/dev/shm|~/Downloads|\$HOME/Downloads|\$\{HOME\}/Downloads"
+    r"|/(?:home|Users)/[^/\s:'\"]+/Downloads)(?:/|$)"
+)
+# The whole value is taken in one linear match, then each entry is checked on its own.
+_LIBRARY_PATH_VALUE = re.compile(r"(?<![\w$])LD_LIBRARY_PATH=['\"]?([^\s'\";&|]*)")
+
+# Writing /etc/ld.so.preload: a redirect, tee, cp, mv, install, or Python open() for
+# writing. Reading it (cat, grep, "<") is not matched.
+_LD_SO_PRELOAD_WRITE = re.compile(
+    r"(?:>>?[ \t]*|\btee\b(?:[ \t]+-\w+)*[ \t]+"
+    r"|\b(?:cp|mv|install)\b(?:[ \t]+-[\w-]+(?:[ \t]+[0-7]{3,4}(?![\w.-]))?)*[ \t]+[^\s|;&]+[ \t]+)"
+    r"['\"]?/etc/ld\.so\.preload(?![\w.-])"
+    r"|\bopen\([ \t]*['\"]/etc/ld\.so\.preload['\"][ \t]*,[ \t]*['\"][wa]",
+)
+
+
+def _check_library_preload(text: str) -> list[str]:
+    hits: list[str] = []
+    seen: set[str] = set()
+    found = [m.group(0) for m in _PRELOAD_ASSIGNMENT.finditer(text)]
+    for match in _LIBRARY_PATH_VALUE.finditer(text):
+        if any(_RISKY_LIBRARY_FOLDER.match(entry) for entry in match.group(1).split(":")):
+            found.append(match.group(0))
+    found += [m.group(0) for m in _LD_SO_PRELOAD_WRITE.finditer(text)]
+    for hit in found:
+        hit = hit.strip()
+        if hit not in seen:
+            seen.add(hit)
+            hits.append(hit)
+    return hits
+
+
+RULE_LIBRARY_PRELOAD = Rule(
+    id="SG-018",
+    name="Library Preloaded Into Other Programs",
+    severity=Severity.MEDIUM,
+    description=(
+        "The skill sets LD_PRELOAD or DYLD_INSERT_LIBRARIES, points LD_LIBRARY_PATH "
+        "at a temporary or download folder, or writes /etc/ld.so.preload. A library "
+        "loaded this way runs inside every program started afterwards and can read or "
+        "change anything those programs do. Some legitimate skills do this too, so "
+        "review why it is needed rather than ignore it."
+    ),
+    remediation=(
+        "Check why the skill needs the preload and where the library comes from. If it "
+        "is not essential, remove the setting; if it is, keep the library in a folder "
+        "the user controls and tell the user before it takes effect."
+    ),
+    check_fn=_check_library_preload,
+    tags=["library-injection", "code-execution", "persistence", "owasp-asi05", "owasp-ast01"],
+)
+
+
 # ── SG-104: Suspicious Tool Name ───────────────────────────────
 
 # A tool name is split into words, at "_", "-", "." and camelCase boundaries, and a
@@ -3783,6 +3854,7 @@ ALL_RULES: list[Rule] = [
     RULE_PACKAGE_REGISTRY,
     RULE_BRAND_NAME_IMPERSONATION,
     RULE_COMPILED_PYTHON,
+    RULE_LIBRARY_PRELOAD,
     RULE_UNRESTRICTED_PATH,
     RULE_SUSPICIOUS_TOOL_NAME,
     RULE_TOOL_NO_DESCRIPTION_OR_SCHEMA,

@@ -42,7 +42,7 @@ An agent skill is a file of instructions or code that an AI agent loads and foll
 - Snyk's ToxicSkills study scanned 3,984 skills from ClawHub and skills.sh. 534 skills (13.4%) had at least one critical issue. 1,467 skills had at least one security issue. Snyk confirmed 76 malicious payloads. [[2]](#sources)
 - The OWASP Agentic Skills Top 10 lists Malicious Skills as AST01 and Supply Chain Compromise as AST02. [[3]](#sources)
 
-skillshield checks skill files for these patterns with 15 rules. It runs locally and needs no network access.
+skillshield checks skill files for these patterns with 16 rules. It runs locally and needs no network access.
 
 ---
 
@@ -428,6 +428,7 @@ and never calls a tool: the scan works offline and sends nothing.
 | SG-013 | HIGH | Untrusted Package Registry | `pip`, `npm` or `yarn` pointed at a registry other than the official one -- `--index-url`, `--extra-index-url`, `-i`, `--registry`, `PIP_INDEX_URL`, `npm config set registry`, `yarn config set npmRegistryServer`, or a `pip.conf`, `.npmrc` or `.pypirc` line that sets an untrusted registry (`registry`, `@scope:registry`, `index-url`, `repository`). TestPyPI counts as untrusted: anyone can publish there. A later install then pulls the attacker's packages (dependency confusion, OWASP AST02). |
 | SG-014 | HIGH | Compiled Python Payload | A `.pyc` or `.pyo` file in a skill folder. Bytecode cannot be reviewed, and Python imports or runs it directly, so a payload can hide behind a harmless-looking skill that claims to call a `.py` script. If the matching `.py` source is missing, the finding names that source file (its file name, not its full path) and asks you to ship the source instead. |
 | SG-015 | MEDIUM | Well-known Skill Name Impersonation | Frontmatter names that closely resemble canonical skill names or add suspicious suffixes such as `1` or `-pro`. |
+| SG-018 | MEDIUM | Library Preloaded Into Other Programs | `LD_PRELOAD` or `DYLD_INSERT_LIBRARIES` set to a value (`export`, `env`, `setenv`, Dockerfile `ENV`, or a leading assignment), `LD_LIBRARY_PATH` with a temporary or download folder among its entries (`/tmp`, `/var/tmp`, `/dev/shm`, `~/Downloads`), and writes to `/etc/ld.so.preload` (a redirect, `tee`, `cp`, `mv`, `install` or Python `open` for writing). A library loaded this way runs inside every program started afterwards. MEDIUM because some legitimate skills do this: the finding asks the reviewer to check why. Mentions that only explain the variables, `unset`, an empty value, and reading `/etc/ld.so.preload` are not flagged. |
 | SG-103 | HIGH | Unrestricted Path Parameter | Each filesystem path parameter needs its own `pattern` or `enum` (including array `items`); a restriction on another field does not hide it. |
 | SG-104 | HIGH | Suspicious Tool Name | An MCP tool in a saved listing whose name suggests harmful behaviour, such as `harvest_credentials`, `exfiltrate_data`, `steal_cookies`, `leak_secrets`, `bypass_auth`, `intercept_requests`, `sniff_traffic`, `dump_credentials` or `upload_all_files`. Words are matched whole, so `stealth_mode_toggle` and `dump_truck_lookup` are not flagged. |
 | SG-105 | MEDIUM | Tool with No Description or Input Schema | An MCP tool in a saved listing with a missing or blank description, or no input schema. |
@@ -483,6 +484,7 @@ Each rule carries tags such as `owasp-asi01` and `owasp-ast01`. They appear in `
 | SG-013 | Untrusted Package Registry | ASI04 Agentic Supply Chain Vulnerabilities | AST02 Supply Chain Compromise |
 | SG-014 | Compiled Python Payload | ASI04 Agentic Supply Chain Vulnerabilities | AST01 Malicious Skills; AST08 Poor Scanning |
 | SG-015 | Well-known Skill Name Impersonation | ASI04 Agentic Supply Chain Vulnerabilities | AST04 Insecure Metadata |
+| SG-018 | Library Preloaded Into Other Programs | ASI05 Unexpected Code Execution | AST01 Malicious Skills |
 | SG-103 | Unrestricted Path Parameter | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
 | SG-104 | Suspicious Tool Name | ASI02 Tool Misuse and Exploitation | AST01 Malicious Skills |
 | SG-105 | Tool with No Description or Input Schema | ASI02 Tool Misuse and Exploitation | AST04 Insecure Metadata |
@@ -715,7 +717,7 @@ skillshield scan ./skills/ --format sarif > skillshield.sarif
 
 - CRITICAL and HIGH findings have the level `error`. MEDIUM is `warning`, LOW is `note` and INFO is `none`.
 - Each result has one location per matched line, up to 5. A finding with no line numbers, such as SG-011, points at line 1.
-- The rule list in the log always holds all 15 rules.
+- The rule list in the log always holds all 16 rules.
 - Files the scan did not open are listed in `runs[0].properties.unscanned`. GitHub code scanning reads `runs[].results[]` only, so that field does not appear on the Security tab; read the SARIF file or the CLI JSON to see it.
 
 ---
@@ -805,7 +807,7 @@ It takes the settings above as environment variables (`SKILLSHIELD_PATHS`, `SKIL
 
 A rule needs an `id`, `name`, `severity`, `description` and `remediation`, plus a `pattern` (a compiled regex) or a `check_fn` (a function that takes the text and returns a list of matched strings).
 
-`SkillScanner(rules=[my_rule])` runs only `my_rule`. To add a rule to the 15 defaults, pass `rules=ALL_RULES + [my_rule]`.
+`SkillScanner(rules=[my_rule])` runs only `my_rule`. To add a rule to the 16 defaults, pass `rules=ALL_RULES + [my_rule]`.
 
 ```python
 import re
