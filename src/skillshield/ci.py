@@ -323,14 +323,21 @@ def console_report(
     )
     for r in flagged[:MAX_FLAGGED_LISTED]:
         annotated += 1
-        ids = ", ".join(f"{f.rule_id} {f.name}" for f in r.findings)
         note = missing_source_note(r)
-        if note:
-            ids = f"{ids}; {note}"
         level = _effective_risk_level(r)
         kind = "error" if exit_code == 1 and level in ("HIGH", "CRITICAL") else "warning"
-        line = r.findings[0].line_numbers[0] if r.findings and r.findings[0].line_numbers else 1
-        lines.append(f"::{kind} file={r.skill_name},line={line},title=SkillShield {level}::{ids}")
+        if not r.findings:
+            msg = note or "Flagged"
+            lines.append(f"::{kind} file={r.skill_name},line=1,title=SkillShield {level}::{msg}")
+            continue
+        for f in r.findings:
+            msg = f"{f.rule_id} {f.name}"
+            if note:
+                msg = f"{msg}; {note}"
+            line = f.line_numbers[0] if f.line_numbers else 1
+            lines.append(
+                f"::{kind} file={r.skill_name},line={line},title=SkillShield {level}::{msg}"
+            )
     flagged_total = len(flagged)
     if flagged_total > annotated:
         lines.append(
